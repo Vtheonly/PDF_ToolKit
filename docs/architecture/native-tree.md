@@ -1,8 +1,33 @@
 # Native Engine — Target Tree & Coexistence Model (issue #1)
 
-Status: **scaffolding (Phase 0 in progress)**. The Python engine remains
-the authoritative implementation until the native core reaches parity and
-the audit's performance gates pass (AGENTS.md §5.6).
+Status: **Phase 0 scaffolding landed (task 0.1 done, task 1.2 in
+progress)**. The Python engine remains the authoritative implementation
+until the native core reaches parity and the audit's performance gates
+pass (AGENTS.md §5.6).
+
+## What exists today (verified 2026-10-09)
+
+```
+native/
+├── CMakeLists.txt              real build logic: 4 targets + 6 ctests
+├── cmake/CompilerWarnings.cmake  zero-warning profile (-Werror)
+├── include/pdftoolkit/
+│   ├── pdftoolkit.h            C-ABI: 6 PDTK_API functions, panic-proof
+│   ├── errors.hpp              ErrorCode enum mirrored from C codes
+│   ├── version.hpp             native_version() -> "0.1.0"
+│   └── memory/arena.hpp        BumpArena (task 1.2, tested)
+├── src/
+│   ├── core/{version,errors}.cpp
+│   ├── memory/arena.cpp        cross-platform aligned alloc
+│   ├── ffi/pdftoolkit.cpp      EngineHandle + C-ABI implementations
+│   ├── python/pdftoolkit_native.cpp  raw C-API extension module
+│   └── cli/main.cpp            --version; subcommands arrive with 7.3
+└── tests/                      minimal harness (ADR-0003) + pure-C smoke
+```
+
+Verified: zero-warning build (GCC 14.2, C++20), ctest 6/6, `nm -D` shows
+exactly the 6 C symbols exported from the FFI library, extension imports
+from Python, CLI runs.
 
 ## Isolation model (ADR-0002)
 

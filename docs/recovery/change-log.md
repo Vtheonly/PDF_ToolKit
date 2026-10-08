@@ -6,6 +6,44 @@ for end users.
 
 ---
 
+## 2026-10-09 — Session 1, continued: issue-1/task-0.1 done (native build system)
+
+* **Native C++20 build system landed (audit task 0.1):** root `CMakeLists.txt`
+  shim + `native/` tree (ADR-0002) with the four audit targets:
+  `pdftoolkit_core` (static), `pdftoolkit_ffi` (shared pure C-ABI),
+  `pdftoolkit_py` (Python extension `pdftoolkit_native`, raw C-API per
+  ADR-0003), `pdftoolkit_cli` (executable). Zero-warning policy enforced
+  with `-Wall -Wextra -Wpedantic -Wconversion -Werror` (GCC/Clang) and
+  `/W4 /permissive- /WX` (MSVC).
+* **Verification evidence:** fresh configure+build → 0 warnings
+  (strict `warning:|error:` grep on full build log); `ctest` 6/6 passed
+  (arena, errors, ffi, c_abi_smoke, cli_version, python_import_smoke);
+  `nm -D` shows the FFI library exports **exactly** the 6 `pdftoolkit_*`
+  C symbols (visibility hygiene: hidden-by-default + `PDTK_API`
+  annotations — an initially leaked mangled C++ symbol was found and
+  eliminated); `pdftoolkit-cli --version` → `pdftoolkit-cli 0.1.0 (native
+  core)`; Python import + all three extension functions work.
+* **C-ABI contract established early (task 7.1 shape):** panic-proof
+  (`PDTK_NOEXCEPT` + try/catch → status codes), honest stubs
+  (`search_wand` → `PDTK_ERR_NOT_IMPLEMENTED`), stable doc ids for
+  `register_document` (existence-validation only until task 1.1).
+* **BumpArena implemented (task 1.2, partial → `in_progress`):** audit
+  spec + three hardening fixes (capacity rounding for `aligned_alloc`'s
+  C11 multiple-of-alignment rule; non-copyable/movable to kill the
+  sketch's double-free; `count * sizeof(T)` overflow guard). 11/11 unit
+  tests pass; 1M allocations + reset measured at 423,258 ns.
+* **Discovery P-011:** the audit's task-1.2 acceptance bound
+  (< 30 µs for 1,000,000 allocations) is physically impossible
+  (30 ps/allocation); recorded with measurement and a correction request
+  for the audit text. Code regression guard set at < 10 ms (intent-level).
+* **Discovery U-008:** MSVC `_aligned_malloc` path is compile-only until
+  a Windows CI run exists.
+* **Environment note persisted:** cmake/ninja live in `.venv` (pip);
+  configure needs `PATH=$PWD/.venv/bin:$PATH` — recorded in
+  AGENTS.md §7 and the workflow docs.
+
+---
+
 ## 2026-10-09 — Session 1, continued: P-007 fixed (T-004)
 
 * **`tests/adapters/test_http.py` collection bug fixed:** replaced the

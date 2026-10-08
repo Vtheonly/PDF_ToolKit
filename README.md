@@ -122,6 +122,24 @@ scans the document once), reusable selection/merge primitives in
 `io/pdfio.py`, streaming HTTP uploads (1 MB chunks), and immediate cleanup
 of temporary resources on failure.
 
+## Native core (in progress)
+
+A C++20 native core is being built under `native/` per
+[issue #1](https://github.com/Vtheonly/PDF_ToolKit/issues/1) — the
+re-architecture from Python wrapper to high-throughput systems engine.
+The Python engine above remains the authoritative implementation until
+the native core reaches parity. Current state (Phase 0):
+
+```bash
+cmake -B build -G Ninja -DPython3_EXECUTABLE=$(which python)  # needs cmake+ninja
+cmake --build build          # 4 targets: core, ffi, py extension, cli — zero warnings
+ctest --test-dir build       # native test suite
+./build/native/pdftoolkit_cli --version
+```
+
+Progress, decisions and verification evidence live in
+[`docs/recovery/task-registry.md`](docs/recovery/task-registry.md).
+
 ## License note
 
 PyMuPDF is licensed under **AGPL-3.0**. Shipping this engine (or any service

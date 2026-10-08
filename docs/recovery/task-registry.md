@@ -24,16 +24,16 @@ issue #1). Pre-issues use the `T-NNN` prefix.
 
 | ID | Task | Status | Evidence / Notes |
 |----|------|--------|------------------|
-| issue-1/task-0.1 | Build system setup (CMake + Ninja, four modular targets) | `pending` | Acceptance: `cmake -B build -G Ninja && ninja -C build` builds `pdftoolkit_core`, `pdftoolkit_ffi`, `pdftoolkit_py`, `pdftoolkit_cli` with zero warnings. See ADR-0002, ADR-0003. |
+| issue-1/task-0.1 | Build system setup (CMake + Ninja, four modular targets) | `done` | Verified: fresh `cmake -B build -G Ninja && ninja -C build` (GCC 14.2, C++20, `-Wall -Wextra -Wpedantic -Wconversion -Werror`) → all four targets build with **zero warnings** (strict grep `warning:|error:` → 0). `ctest` → 6/6 passed. `nm -D` → FFI exports exactly the 6 `pdftoolkit_*` C symbols (pure C-ABI). CLI runs; Python extension imports. See ADR-0002, ADR-0003. |
 | issue-1/task-0.2 | Automated benchmarking pipeline (Google Benchmark) | `pending` | Requires FetchContent network access at configure time — see ADR-0003 for the deferral rationale. |
-| issue-1/task-0.3 | Sanitizers and hardening pipeline (`CMakePresets.json`, CI) | `pending` | ASan/UBSan/TSan verifiable locally with GCC 14.2; MSan requires clang → CI-only (unknown U-004). |
+| issue-1/task-0.3 | Sanitizers and hardening pipeline (`CMakePresets.json`, CI) | `pending` | ASan/UBSan/TSan verifiable locally with GCC 14.2; MSan requires clang → CI-only (unknown U-002). |
 
 ### Phase 1 — Native memory subsystem & virtual page slabs
 
 | ID | Task | Status | Evidence / Notes |
 |----|------|--------|------------------|
 | issue-1/task-1.1 | Guarded memory-mapped buffer manager (`MmapHandle`) | `pending` | Depends on 0.1. |
-| issue-1/task-1.2 | Thread-local bump-pointer arena allocator | `pending` | Depends on 0.1. Spec fully given in the audit. |
+| issue-1/task-1.2 | Thread-local bump-pointer arena allocator | `in_progress` | `BumpArena` implemented per audit spec + hardening (capacity rounding for `aligned_alloc`, non-copyable/movable, count-overflow guard) in `native/include/pdftoolkit/memory/arena.hpp`; 11/11 unit tests pass (alignment, sequencing, exhaustion, reset, move semantics, overflow). Indicative timing: 1,000,000 allocs + reset = **423,258 ns** (~0.42 ns/alloc). REMAINING: authoritative Google Benchmark measurement (blocked on task 0.2) and the audit's mis-scaled acceptance bound — see P-011. |
 | issue-1/task-1.3 | Unified Page Slab (UPS) binary layout | `pending` | Depends on 1.1, 1.2. `static_assert(sizeof(PageSlabHeader) == 64)`. |
 
 ### Phase 2 — PDF binary protocol, object graph, SIMD decompression

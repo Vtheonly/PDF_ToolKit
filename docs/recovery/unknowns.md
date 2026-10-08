@@ -73,3 +73,13 @@ entry resolved with a pointer.
   tests are the complete behavioural specification.
 * **How to resolve:** ask the repository owner if a question ever requires
   original-source archaeology.
+
+## U-008 — MSVC `_aligned_malloc` path is compile-only until CI runs
+
+* **Question:** Does `BumpArena`'s `#ifdef _MSC_VER` allocation path
+  (`_aligned_malloc` / `_aligned_free`) compile and behave correctly?
+* **Assumption (current):** yes — it is the canonical MSVC idiom and is
+  symmetrical with the POSIX path; but the reference environment has GCC
+  only, so it has never been compiled here.
+* **How to resolve:** first Windows CI run (task 0.3's matrix); the
+  pure-C smoke test and arena tests must pass there unchanged.

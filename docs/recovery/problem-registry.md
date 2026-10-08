@@ -115,7 +115,7 @@ history — do not delete them.
   implement it). The reference environment has only GCC 14.2.0.
 * **Impact:** The audit's Task 0.3 MSan preset cannot be locally verified;
   it must run in CI with a clang toolchain.
-* **Status:** `open` (CI-only verification) — see U-004.
+* **Status:** `open` (CI-only verification) — see U-002.
 
 ## P-009 — AGPL-3.0 licensing of the PDF backend (distribution constraint)
 
@@ -135,3 +135,28 @@ history — do not delete them.
 * **Status:** `open` (accepted pitfall; P-007's fix reduces it to a clean
   skip). Recorded so the next agent does not misread a collection error as
   engine breakage.
+
+## P-011 — Audit task-1.2 acceptance criterion is physically mis-scaled (audit defect)
+
+* **Where:** `docs/issues.md` (issue #1), Task 1.2 acceptance: "Benchmark
+  demonstrating that 1,000,000 slice allocations and a `.reset()` call
+  execute in < 30 microseconds total".
+* **What:** 30 µs / 1,000,000 allocations = **30 picoseconds per
+  allocation** — below the per-operation latency of any existing CPU
+  (a single L1-hit instruction is ~100–300 ps; a taken branch alone can
+  exceed 30 ps). The criterion cannot be met by any implementation,
+  including a perfect bump allocator in hand-written assembly.
+* **Verified:** the Phase-0 `BumpArena` measures **423,258 ns**
+  (≈ 0.42 ns/allocation, ~1–2 cycles/alloc at -O3) for exactly this
+  workload — roughly **14× over** the audit's bound while being, for all
+  practical purposes, at the hardware floor. Test:
+  `build/native/pdtk_test_arena` (case `million_allocations_and_reset_are_fast`).
+* **Root cause (of the audit text):** the criterion was likely drafted as
+  "30 µs for 1,000 allocations" or "30 ms" and scaled inconsistently.
+* **Resolution:** treat the *intent* (bump allocation ≈ free, O(1) reset)
+  as authoritative, not the literal number. The regression guard in the
+  test asserts < 10 ms; the authoritative measurement lands with Google
+  Benchmark (task 0.2). **Action for the audit owner:** correct the
+  criterion in `docs/issues.md` / issue #1.
+* **Status:** `open` (audit text itself needs amendment; code side is
+  done and guarded).
