@@ -67,6 +67,10 @@ for end users.
   asan+ubsan 8/8 (zero findings — includes 20k partial-chunk SIMD scans,
   the staging-buffer fix's proof); tsan 8/8; offline (no FetchContent)
   9/9; Python 644 passed.
+  **Live CI on the task-2.1 commit (0f87953): all 5 jobs green** — run
+  37846501597 (pytest py3.9/3.12, native release + benchmarks, asan,
+  tsan); the trailer suite's 10k corpus and fork-free honesty cases run
+  clean on the hosted runner.
 
 ---
 
