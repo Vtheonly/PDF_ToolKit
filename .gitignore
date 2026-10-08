@@ -1,21 +1,10 @@
 # =============================================================================
-# PDF Toolkit
+# pdftoolkit - Unified Headless PDF Engine
 # .gitignore
 #
-# This repository is a monorepo containing several sub-projects:
-#   - pdf-search        : Electron + Flask PDF search/extraction app
-#   - pdfm              : PDF merge tool (Python)
-#   - pdftoolkit        : integration folder (contains pdf-search, pdfm)
-#   - PDF Toolkit       : collection of PDF utilities (Python)
-#
-# A single root .gitignore is applied to every sub-directory because Git
-# patterns are relative to the .gitignore location and naturally match anything
-# below it (unless the pattern starts with a slash). No sub-folder .gitignore
-# is needed.
-#
-# NOTE: files already tracked by Git stay tracked after this file is added.
-# To stop tracking the noise (e.g. node_modules, .venv) and purge it from
-# history, run:  git rm -r --cached .   then commit the result.
+# Single-application repository: one Python engine (src/pdftoolkit) plus its
+# test suite. Patterns are relative to the repository root and match anything
+# below it.
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -24,12 +13,10 @@
 # macOS
 .DS_Store
 .DS_Store?
-.DS_KeepAlive
 .Spotlight-V100
 .Trashes
 .NFS
 .AppleDouble
-.LSOverride
 # Windows
 Thumbs.db
 Thumbs.db:encryptable
@@ -90,8 +77,6 @@ pip-wheel-metadata/
 *.egg
 *.manifest
 *.spec
-# Installer logs
-pip-log.txt
 # Unit test / coverage
 htmlcov/
 .tox/
@@ -105,63 +90,39 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+.pytype/
 # Translations
 *.mo
 *.pot
-# Django / Flask / Scrapy / Jupyter
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-instance/
-.webassets-cache
-.scrapy
-.ipynb_checkpoints/
-# pyenv / pipenv
-.python-version
-Pipfile.lock
-
-# ---------------------------------------------------------------------------
-# Node.js / Electron (pdf-search frontend, PDF Search Engine)
-# ---------------------------------------------------------------------------
-node_modules/
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-# Frontend IDE / cache
-.vscode/
-.idea/
-# Electron app artifacts (build output)
-app/
-*.app
-*.exe
-*.dmg
-*.deb
-*.msi
-*.dll
-
-# ---------------------------------------------------------------------------
-# Logs, temporary files and generated output
-# ---------------------------------------------------------------------------
-# Application logs
+# Logs
 *.log
 logs/
-# Temporary files / directories
-*.tmp
-*.temp
-temp/
-*~
-*.bak
-# Generated output folders
-output/
-dist/
-extracted_images/
 
 # ---------------------------------------------------------------------------
-# Env / secret files and user editor settings
+# Editor / IDE settings
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.code-workspace
+.python-version
+
+# ---------------------------------------------------------------------------
+# Local environment / secrets
 # ---------------------------------------------------------------------------
 .env
 .env.local
 .env.*.local
-*.code-workspace
+
+# ---------------------------------------------------------------------------
+# Generated output (never commit engine outputs)
+# ---------------------------------------------------------------------------
+output/
+out/
+temp/
+tmp/
+*.tmp
+*.temp
+merged.pdf
