@@ -99,7 +99,15 @@ history — do not delete them.
   "1 skipped").
 * **Fix:** use `pytest.importorskip("fastapi")` (+ httpx) before the
   fastapi imports, exactly like `test_http_upload.py`.
-* **Status:** `open` — task T-004 in the task registry.
+* **Status:** `resolved` — fixed in this commit (task T-004; see git log for SHA). Verified in
+  both environments:
+  * with `http` extra: `pytest` → `644 passed, 1 warning` (no regression;
+    per-file counts identical);
+  * without `http` extra (clean `.[dev]`-only venv): `pytest` →
+    `589 passed, 5 skipped`, exit 0, **no collection error** — the two
+    HTTP modules (28 + 24 tests) now skip at module level (2 skip
+    entries) and 3 http-specific tests in `test_edge_cases.py` skip at
+    function level, matching the documented "skip cleanly" behaviour.
 
 ## P-008 — MemorySanitizer unverifiable in the local environment (limitation)
 

@@ -112,9 +112,9 @@ tests/adapters/    CLI + HTTP: envelopes, exit codes, status mapping, uploads
 ```
 All tests build their own tiny PDFs with PyMuPDF (no fixtures on disk), so
 they are deterministic, isolated and fast. Optional-dependency tests
-(FastAPI, pyttsx3) skip cleanly when the extra is not installed — with one
-known exception being fixed under task T-004 (problem P-007,
-`docs/recovery/`). The suite (644 tests, verified via
+(FastAPI, pyttsx3) skip cleanly when the extra is not installed (fixed via
+`pytest.importorskip`, problem P-007 / task T-004 in `docs/recovery/`).
+The suite (644 tests, verified via
 `pytest --collect-only -q`) covers ~97% of the engine; the only uncovered block is the real
 pyttsx3 engine wrapper, which requires audio hardware.
 

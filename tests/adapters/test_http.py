@@ -4,16 +4,17 @@ Skipped automatically when the optional ``http`` extra (fastapi + httpx)
 is not installed.
 """
 
-import importlib.util
 import json
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    importlib.util.find_spec("fastapi") is None
-    or importlib.util.find_spec("httpx") is None,
-    reason="fastapi/httpx extras not installed",
-)
+# Skip cleanly at collection time when the optional ``http`` extra is not
+# installed. ``pytest.mark.skipif`` cannot guard module-level imports (a
+# missing fastapi would abort the whole run at collection instead of
+# skipping - problem P-007); ``importorskip`` raises Skipped before the
+# imports below execute. Same pattern as test_http_upload.py.
+pytest.importorskip("fastapi")
+pytest.importorskip("httpx")
 
 from fastapi.testclient import TestClient  # noqa: E402
 

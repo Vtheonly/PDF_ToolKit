@@ -6,6 +6,25 @@ for end users.
 
 ---
 
+## 2026-10-09 — Session 1, continued: P-007 fixed (T-004)
+
+* **`tests/adapters/test_http.py` collection bug fixed:** replaced the
+  ineffective `pytestmark = skipif(...)` + module-level fastapi import
+  (which aborts the entire suite at collection when the `http` extra is
+  missing) with `pytest.importorskip("fastapi")` / `("httpx")` — the same
+  pattern its sibling `test_http_upload.py` already used.
+* **Verification (both directions):**
+  * with `http` extra: `644 passed, 1 warning` — no regression;
+  * clean `.[dev]`-only venv: `589 passed, 5 skipped`, exit code 0,
+    `SKIPPED` reasons all read `could not import 'fastapi'` — the
+    documented "skip cleanly" behaviour now actually holds.
+* **Accounting note (so the numbers never confuse anyone again):** the two
+  HTTP modules hold 28 + 24 tests; a module-level skip counts as **one**
+  skip entry, and 3 http-specific tests in `test_edge_cases.py` skip at
+  function level → 644 − 55 = 589 passed + 5 skips.
+
+---
+
 ## 2026-10-09 — Session 1 (issue #1 kickoff: agent infrastructure + continuity system)
 
 * **Repository state verified (T-000, `not_applicable`):** the repo has

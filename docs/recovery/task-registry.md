@@ -16,7 +16,7 @@ issue #1). Pre-issues use the `T-NNN` prefix.
 | T-001 | Create `AGENTS.md` (first iteration) + `docs/agent/` guides | `done` | Commit `932cf07`. Written after full-repo inspection; environment facts verified live. |
 | T-002 | Create continuity docs (`docs/recovery/*`, `docs/architecture/*`, `docs/decisions/*`, this registry) | `done` | This commit. Evidence: files exist, cross-referenced from AGENTS.md. |
 | T-003 | Fix stale test-count claims (README/ARCHITECTURE say 646; suite has 644) | `done` | This commit. Evidence: `.venv/bin/python -m pytest --collect-only -q` → `644 tests collected`. Problem P-006. |
-| T-004 | Fix `tests/adapters/test_http.py` collection error when `http` extra absent | `pending` | Problem P-007. Reproduced 2026-10-09 (`ModuleNotFoundError: No module named 'fastapi'` → `1 error during collection`, suite aborted). Fix: `pytest.importorskip` pattern as already used by `test_http_upload.py`. |
+| T-004 | Fix `tests/adapters/test_http.py` collection error when `http` extra absent | `done` | Problem P-007. Reproduced 2026-10-09 (`ModuleNotFoundError` → collection abort). Fixed with `pytest.importorskip`. Verified: with extra → `644 passed`; without extra (clean `.[dev]` venv) → `589 passed, 5 skipped`, exit 0, no collection error. |
 
 ## Issue #1 — Native C++20 re-architecture epic (`docs/issues.md`)
 
