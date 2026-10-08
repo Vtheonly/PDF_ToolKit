@@ -1,0 +1,99 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release (optimized, -march=native)",
+      "description": "Optimized native build with the zero-warning policy (audit task 0.1).",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug",
+      "description": "Unoptimized build with assertions enabled.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "AddressSanitizer + UBSan (GCC/Clang)",
+      "description": "Debug build instrumented with -fsanitize=address,undefined and -fno-sanitize-recover=all (any sanitizer finding fails the test). The python_import_smoke ctest is excluded here: loading an instrumented module into an uninstrumented CPython is unsupported by the toolchain and meaningless for finding engine bugs.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer",
+        "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
+      }
+    },
+    {
+      "name": "tsan",
+      "displayName": "ThreadSanitizer (GCC/Clang)",
+      "description": "Debug build instrumented with -fsanitize=thread. Foundation for the concurrency tests of issue-1 tasks 6.1-6.3; today's suite is single-threaded, so this verifies instrumentation, linking and a clean baseline. python_import_smoke is excluded for the same reason as in the asan preset.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/tsan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
+        "CMAKE_C_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer"
+      }
+    },
+    {
+      "name": "msan",
+      "displayName": "MemorySanitizer (clang + instrumented libc++ ONLY)",
+      "description": "CI-only preset: GCC does not implement -fsanitize=memory (docs/recovery/problem-registry.md P-008), and a meaningful MSan run requires every linked library (including the C++ standard library) to be instrumented, i.e. a clang + MSan-instrumented libc++ toolchain. Configure with a clang toolchain, e.g.: CC=clang CXX=clang++ cmake --preset msan.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/msan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS": "-fsanitize=memory -fno-omit-frame-pointer",
+        "CMAKE_C_FLAGS": "-fsanitize=memory -fno-omit-frame-pointer"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "release", "configurePreset": "release" },
+    { "name": "debug", "configurePreset": "debug" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "msan", "configurePreset": "msan" }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "output": { "outputOnFailure": true }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "name": "^python_import_smoke$" } }
+    },
+    {
+      "name": "tsan",
+      "configurePreset": "tsan",
+      "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "name": "^python_import_smoke$" } }
+    },
+    {
+      "name": "msan",
+      "configurePreset": "msan",
+      "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "name": "^python_import_smoke$" } }
+    }
+  ]
+}

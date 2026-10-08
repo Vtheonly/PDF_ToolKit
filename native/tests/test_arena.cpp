@@ -8,6 +8,22 @@
 
 #include "pdftoolkit/memory/arena.hpp"
 
+// Sanitizer + optimization detection: performance regression guards are
+// meaningful only in optimized, uninstrumented builds. Measured for the
+// 1M-allocation loop below: 0.42 ms (Release/-O3) vs ~42 ms (ASan) vs
+// ~21 ms (Debug/-O0). Functional assertions stay active in every build.
+#if defined(__has_feature)
+#  if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
+      __has_feature(memory_sanitizer)
+#    define PDTK_TIMING_GUARDS_OFF 1
+#  endif
+#elif defined(__SANITIZE_ADDRESS__) || defined(__SANITIZE_THREAD__)
+#  define PDTK_TIMING_GUARDS_OFF 1
+#endif
+#if !defined(NDEBUG)
+#  define PDTK_TIMING_GUARDS_OFF 1  // unoptimized builds: timing is noise
+#endif
+
 namespace {
 
 using pdftoolkit::memory::BumpArena;
@@ -143,7 +159,13 @@ PDTK_TEST(million_allocations_and_reset_are_fast) {
         std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count();
     std::printf("        1,000,000 allocs + reset: %lld ns\n",
                 static_cast<long long>(nanos));
-    PDTK_ASSERT(nanos < 10'000'000);  // < 10 ms regression guard
+#if defined(PDTK_TIMING_GUARDS_OFF)
+    // Instrumented or unoptimized build: wall-clock guards are noise
+    // (measured: 0.42 ms Release vs ~42 ms ASan vs ~21 ms Debug).
+    (void)nanos;
+#else
+    PDTK_ASSERT(nanos < 10'000'000);  // < 10 ms regression guard (Release)
+#endif
 }
 
 }  // namespace

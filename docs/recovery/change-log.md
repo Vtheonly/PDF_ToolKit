@@ -100,3 +100,36 @@ for end users.
 * **ADRs recorded:** 0001 single-branch policy; 0002 native-tree isolation
   under `native/`; 0003 Phase-0 offline-build minimal-dependency rule;
   0004 rejection of the Python-level scan optimization.
+
+---
+
+## 2026-10-09 — Session 1, continued: issue-1/task-0.3 done (sanitizer + CI pipeline)
+
+* **`CMakePresets.json` landed:** `release`, `debug`, `asan`
+  (Address+UBSan with `-fno-sanitize-recover=all` — any finding fails the
+  test), `tsan`, and `msan` (CI-only; clang + instrumented libc++
+  required), each with matching build/test presets and isolated
+  `build/<preset>` directories.
+* **Sanitizer test exclusion policy:** the `python_import_smoke` ctest is
+  excluded in sanitizer presets — loading an instrumented extension into
+  an uninstrumented CPython is a toolchain-unsupported, meaningless
+  configuration. Rationale documented in the preset description.
+* **Verified locally (GCC 14.2):** release 6/6, debug 6/6, asan 5/5 with
+  **zero sanitizer findings**, tsan 5/5 with zero findings; all builds
+  had 0 compiler diagnostics. The `msan` preset fails with GCC exactly as
+  P-008 documents (`cc: error: unrecognized argument to '-fsanitize='
+  option: 'memory'`).
+* **`.github/workflows/ci.yml` created:** push-triggered (single-branch
+  policy), 4 jobs — Python suite on a 3.9/3.12 matrix, native release
+  (zero-warning gate), native asan, native tsan. Includes the
+  `vm.mmap_rnd_bits=28` mitigation for the known ubuntu-24.04
+  sanitizer/ASLR shadow-memory runner issue. YAML-validated locally;
+  **first live run pending** (tracked as U-002).
+* **Discovery — timing guards are configuration-sensitive:** the arena's
+  1M-allocation wall-clock regression guard tripped under ASan
+  (41.6 ms vs 0.42 ms) and under Debug/-O0 (20.6 ms). Fixed by gating the
+  assertion on optimized, uninstrumented builds only
+  (`PDTK_TIMING_GUARDS_OFF` in `native/tests/test_arena.cpp`, covering
+  `__has_feature`/`__SANITIZE_*` and `NDEBUG`). Rule added to
+  dos-and-donts.md: **functional assertions always; wall-clock assertions
+  only in Release without instrumentation**.

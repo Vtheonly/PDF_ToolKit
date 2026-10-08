@@ -26,7 +26,7 @@ issue #1). Pre-issues use the `T-NNN` prefix.
 |----|------|--------|------------------|
 | issue-1/task-0.1 | Build system setup (CMake + Ninja, four modular targets) | `done` | Verified: fresh `cmake -B build -G Ninja && ninja -C build` (GCC 14.2, C++20, `-Wall -Wextra -Wpedantic -Wconversion -Werror`) → all four targets build with **zero warnings** (strict grep `warning:|error:` → 0). `ctest` → 6/6 passed. `nm -D` → FFI exports exactly the 6 `pdftoolkit_*` C symbols (pure C-ABI). CLI runs; Python extension imports. See ADR-0002, ADR-0003. |
 | issue-1/task-0.2 | Automated benchmarking pipeline (Google Benchmark) | `pending` | Requires FetchContent network access at configure time — see ADR-0003 for the deferral rationale. |
-| issue-1/task-0.3 | Sanitizers and hardening pipeline (`CMakePresets.json`, CI) | `pending` | ASan/UBSan/TSan verifiable locally with GCC 14.2; MSan requires clang → CI-only (unknown U-002). |
+| issue-1/task-0.3 | Sanitizers and hardening pipeline (`CMakePresets.json`, CI) | `done` (first live CI run pending → U-002) | Locally verified 2026-10-09: `release` 6/6, `debug` 6/6, `asan` (ASan+UBSan, `-fno-sanitize-recover=all`) 5/5 zero findings, `tsan` 5/5 zero findings — all with 0 compiler diagnostics. `msan` preset present but GCC-rejected as documented (`cc: error: unrecognized argument to '-fsanitize=' option: 'memory'` — P-008); requires clang + instrumented libc++ in CI. `.github/workflows/ci.yml` written (4 jobs: python 3.9/3.12 matrix, native release/asan/tsan) and YAML-validated; first live run will confirm runner assumptions (U-002). |
 
 ### Phase 1 — Native memory subsystem & virtual page slabs
 
@@ -95,14 +95,20 @@ issue #1). Pre-issues use the `T-NNN` prefix.
 
 ## Next tasks (recommended order)
 
-1. **T-004** — one-line test-suite robustness fix, unblocks clean `.[dev]`-only runs.
-2. **issue-1/task-0.1** — CMake + four targets, zero-warning build (unblocks all native phases).
-3. **issue-1/task-0.3** — sanitizer presets + CI (parallel-safe after 0.1).
-4. **issue-1/task-0.2** — Google Benchmark pipeline (needs network-at-configure policy decision, ADR-0003).
-5. **issue-1/task-1.1 / 1.2 / 1.3** — memory subsystem (audit spec is fully prescriptive).
+1. **issue-1/task-0.2** — Google Benchmark pipeline (needs the
+   FetchContent network policy decision, ADR-0003/U-006; also unlocks the
+   authoritative BumpArena measurement to close task 1.2).
+2. **issue-1/task-1.1** — `MmapHandle` (guarded memory-mapped buffer
+   manager; audit spec is prescriptive; unblocks 1.3 and Phase 2).
+3. **issue-1/task-1.3** — Unified Page Slab layout (`static_assert`
+   header + `PageSlabView` span accessors).
+4. **U-002 follow-up** — confirm the first live CI run (runner toolchain,
+   msan-with-clang job if pursued).
+5. **P-011 follow-up** — ask the audit owner to correct the mis-scaled
+   task-1.2 acceptance bound in `docs/issues.md` / issue #1.
 
 ## Session log
 
 | Date | Session | Tasks progressed |
 |------|---------|------------------|
-| 2026-10-09 | Session 1 (issue-#1 kickoff) | T-000 verified N/A; T-001, T-002, T-003 done; P-006/P-007 filed; baseline 644/644 green established. |
+| 2026-10-09 | Session 1 (issue-#1 kickoff) | T-000 verified N/A; T-001..T-004 done; baseline 644/644 green established; issue-1/task-0.1 done; issue-1/task-0.3 done (CI first run pending); issue-1/task-1.2 in progress (arena + 11 tests; benchmark pending 0.2); discoveries P-006..P-011, U-001..U-008 filed; ADR-0001..0004 recorded. |

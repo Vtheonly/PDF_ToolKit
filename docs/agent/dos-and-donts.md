@@ -52,6 +52,12 @@ repository. Violating a DON'T has caused, or would have caused, actual bugs.
   FFI body in `try/catch (...)` → integer error codes (audit Task 7.1).
 * **DON'T** claim performance numbers without a benchmark artifact and the
   command that produced it.
+* **DO** gate wall-clock assertions on optimized, uninstrumented builds:
+  sanitizers cost ~100x (measured 0.42 ms → 41.6 ms under ASan) and -O0
+  ~50x on allocation-heavy loops. Use the `PDTK_TIMING_GUARDS_OFF`
+  pattern from `native/tests/test_arena.cpp` (`__has_feature` /
+  `__SANITIZE_*` + `NDEBUG`). Functional assertions stay active in every
+  build.
 * **DO** keep stubs honestly labelled: FFI functions without backing
   implementations return `PDTK_ERR_NOT_IMPLEMENTED`; never fake success.
 * **DON'T** delete or stub Python engine capabilities while their native
