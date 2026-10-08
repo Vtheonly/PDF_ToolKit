@@ -6,6 +6,70 @@ for end users.
 
 ---
 
+## 2026-10-09 — Session 3: issue-1/task-2.1 done (backward startxref & trailer scanner)
+
+* **Phase 2 opened (audit task 2.1):**
+  `native/include/pdftoolkit/parser/trailer.hpp` +
+  `native/src/parser/trailer.cpp` — `locate_startxref(span, tail_window =
+  1024)` returning `TrailerInfo` (xref offset, keyword position, zero-copy
+  classic-trailer dictionary view, `/Root` reference, `/Prev` offset).
+  Zero-copy by construction: every view points into the caller's buffer
+  (typically `MmapHandle::bytes()`); the mmap composition is test-locked
+  including a pointer-identity proof that the dict view lies inside the
+  mapping.
+* **SIMD per the audit, but runtime-dispatched:** the backward needle
+  search compiles `_mm256_cmpeq_epi8` against 's' behind a function
+  target attribute and dispatches via `__builtin_cpu_supports("avx2")`,
+  with a portable scalar fallback (non-x86, MSVC, pre-AVX2 hosts — and
+  Debug builds, which do not get `-march=native`). The two paths are
+  differential-tested over the whole acceptance corpus via the
+  `detail::set_search_force_scalar` test hook (documented tests-only).
+  **Implementation trap caught in review before it shipped:** the partial
+  top chunk of the scan window must not be loaded with a raw 32-byte
+  `_mm256_loadu` — it would read past the buffer (ASan heap overread on
+  small files; SIGBUS past an mmap). Fixed with a zeroed staging buffer
+  + bit mask; the 20,000 partial-chunk scans under ASan are the
+  regression proof.
+* **Tolerant last-valid-wins candidate loop:** keyword candidates are
+  validated in descending position order; near-miss decoys
+  (`startxref` glued to a regular character, `startxref\n` + non-numeric
+  or overflowing junk) are skipped, so trailing junk containing decoy
+  text does not defeat the scan. The 64-bit offset parse follows PDF
+  integer token grammar (optional `+`, terminated by whitespace, a
+  delimiter — e.g. `123%%EOF` — or end-of-buffer) with overflow
+  rejection.
+* **String-aware, nesting-aware trailer parsing:** the classic
+  dictionary is located backward from the keyword, then re-verified
+  forward with a tokenizer that skips literal strings (escapes and
+  balanced parens), hex strings and nested dictionaries — `/Root` and
+  `/Prev` decoys inside strings or nested dictionaries are invisible by
+  construction, and the `<<`…`>>` pair must line up exactly with the
+  bytes preceding the keyword or the dictionary fields stay honestly
+  empty. XRef-stream-style files (no `trailer` keyword) yield an empty
+  dict view by design — their stream dictionary is task 2.2's scope.
+* **Acceptance criterion met:** "correct offset identification across
+  10,000 PDF test files with variable whitespace and trailing junk
+  bytes" — 10,000 deterministic synthetic documents (LCG-varied
+  whitespace incl. `\r\n`/TAB/FF/NUL, up to 300 B of 's'-dense trailing
+  junk with injected near-miss decoys, `/Root`/`/Prev` presence and
+  values varied, nested-dict/string/name-suffix decoys, XRef-stream
+  style every 11th document), every document asserted on offset + `/Root`
+  + `/Prev` + dict view; run twice (AVX2 and forced scalar). 31/31 test
+  cases total. The no-binary-fixtures interpretation is recorded as
+  U-013 (with a PyMuPDF differential test as the future upgrade path).
+* **Audit limitation registered (P-016):** the audit's fixed 1024-byte
+  backward-scan window is a tunable, not a format limit — files with
+  heavier trailing junk need a wider window. Implemented as the
+  `tail_window` parameter (default 1024 per the audit), window-edge
+  behaviour test-locked.
+* **Verification matrix (all 2026-10-09):** release zero-warning + ctest
+  **9/9** (the new `trailer` ctest grows the suite from 8); debug 9/9;
+  asan+ubsan 8/8 (zero findings — includes 20k partial-chunk SIMD scans,
+  the staging-buffer fix's proof); tsan 8/8; offline (no FetchContent)
+  9/9; Python 644 passed.
+
+---
+
 ## 2026-10-09 — Session 2 (cont.): issue-1/task-1.3 done (Unified Page Slab)
 
 * **UPS binary layout landed (audit task 1.3):**

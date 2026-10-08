@@ -138,6 +138,31 @@ entry resolved with a pointer.
   mapping; SEH translation is a deliberate follow-up decision (needs an
   ADR of its own — mixing SEH and C++ exceptions has its own rules).
 
+## U-013 — No real-world PDF corpus in-repo; native acceptance tests use synthetic documents
+
+* **Question:** The audit's task-2.1 acceptance names "10,000 PDF test
+  files". The repository deliberately carries no binary fixtures
+  (AGENTS.md §4.8: tests build their own PDFs; no binary fixtures on
+  disk) and no external corpus is vendored. How should PDF-parser
+  acceptances be satisfied, and how do we know the synthetic documents
+  exercise the same paths real files do?
+* **Assumption (current):** a deterministic synthetic corpus
+  (LCG-seeded, 10,000 documents for task 2.1) varying every axis the
+  acceptance names (whitespace mix, trailing junk, decoys, optional
+  entries) satisfies the criterion's intent — the same approach the
+  Python engine's 644-test suite takes. Known gap: synthetic documents
+  only contain defects and shapes the generator thought of. Real-world
+  corpora (e.g. the pdf.js/mupdf test sets, Ghostscript's corpus)
+  contain stranger pathologies (hybrid XRef chains, object streams
+  referring to deleted objects, 1-byte files, encodings).
+* **How to resolve:** when a corpus becomes available (downloaded at
+  test time is against the offline-build principle — so likely a
+  separately-fetched developer-only corpus), run a differential test:
+  native scanner vs PyMuPDF (`fitz.Document.xref_length()` /
+  trailer access) over the same files, asserting matching `startxref`
+  offsets and `/Root` references. Until then the synthetic corpus is
+  the honest, reproducible evidence.
+
 ## U-012 — Absolute throughput gates exceed the reference environment's ceiling
 
 * **Question:** Can the audit's later throughput acceptance gates be

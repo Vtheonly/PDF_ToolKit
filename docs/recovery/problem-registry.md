@@ -248,6 +248,29 @@ history — do not delete them.
 * **Status:** `open` (audit text amendment outstanding; code side done,
   verified under ASan+UBSan and TSan).
 
+## P-016 — Audit task-2.1 hard-codes the backward-scan window at 1024 bytes (audit limitation)
+
+* **Where:** `docs/issues.md` (issue #1), Task 2.1 step 2: "Scan the last
+  1024 bytes of the memory-mapped file backward."
+* **What:** 1024 bytes is a *tunable*, not a format limit. Real files can
+  carry more than 1 KiB of trailing data after the final `%%EOF`
+  (appended junk, signatures, some linearization arrangements); with a
+  hard 1024-byte window such files are rejected as `UnreadablePdf` even
+  though their `startxref` is present and unambiguous further back.
+  Production readers make the same trade-off visible: pdf.js slices the
+  last 1024 bytes, MuPDF searches deeper.
+* **Resolution implemented (2026-10-09):** `locate_startxref` takes the
+  window as a parameter (`tail_window`, default 1024 — the audit's
+  value), so callers with corpora known to carry heavy trailing junk
+  can widen it without code changes. The window edge is test-locked
+  (`keyword_exactly_at_window_edge_is_found`,
+  `keyword_outside_default_window_needs_larger_window`).
+* **Action for the audit owner:** note the tunable in task 2.1's text in
+  `docs/issues.md` / issue #1 (the default stays 1024; the acceptance
+  corpus stays inside it).
+* **Status:** `open` (audit text amendment outstanding; code side done
+  and test-locked).
+
 ## P-015 — Audit task-1.3's PageSlabHeader cannot satisfy its own static_assert (audit defect)
 
 * **Where:** `docs/issues.md` (issue #1), Task 1.3 step 1: the specified

@@ -49,6 +49,7 @@ add_library(pdftoolkit_core STATIC
   src/memory/arena.cpp
   src/memory/mmap.cpp
   src/memory/page_slab.cpp
+  src/parser/trailer.cpp
 )
 target_include_directories(pdftoolkit_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -123,6 +124,9 @@ if(PDTK_BUILD_TESTS)
   add_executable(pdtk_test_slab tests/test_slab.cpp)
   target_link_libraries(pdtk_test_slab PRIVATE pdftoolkit_core pdtk_warnings)
 
+  add_executable(pdtk_test_trailer tests/test_trailer.cpp)
+  target_link_libraries(pdtk_test_trailer PRIVATE pdftoolkit_core pdtk_warnings)
+
   add_executable(pdtk_test_ffi tests/test_ffi.cpp)
   target_link_libraries(pdtk_test_ffi PRIVATE pdftoolkit_ffi pdtk_warnings)
 
@@ -135,6 +139,7 @@ if(PDTK_BUILD_TESTS)
   add_test(NAME errors       COMMAND pdtk_test_errors)
   add_test(NAME mmap         COMMAND pdtk_test_mmap)
   add_test(NAME slab         COMMAND pdtk_test_slab)
+  add_test(NAME trailer      COMMAND pdtk_test_trailer)
   add_test(NAME ffi          COMMAND pdtk_test_ffi)
   add_test(NAME c_abi_smoke  COMMAND pdtk_c_abi_smoke)
   add_test(NAME cli_version  COMMAND pdftoolkit_cli --version)
