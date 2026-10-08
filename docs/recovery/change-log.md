@@ -67,6 +67,9 @@ for end users.
   7/7; debug 7/7; asan+ubsan `-fno-sanitize-recover=all` 6/6; tsan 6/6;
   offline `-DPDTK_ENABLE_BENCHMARKS=OFF` 7/7 (no `_deps`); Python 644
   passed.
+  **Live CI on the task-1.1 commit (5346a2e): all 5 jobs green** — run
+  37833962102; the benchmark step now executes both `pdtk_bench_arena`
+  and `pdtk_bench_mmap` on the runner.
 
 ---
 
