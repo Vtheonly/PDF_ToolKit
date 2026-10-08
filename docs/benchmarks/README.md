@@ -52,4 +52,7 @@ lives at the top of `native/benchmarks/CMakeLists.txt`.
 
 | Date | File | Scope |
 |------|------|-------|
+| 2026-10-09 | [2026-10-09-phase2-lexer-baseline.md](2026-10-09-phase2-lexer-baseline.md) | ZeroCopyLexer (task 2.3; gate P-018 analysis, same-run control) |
+| 2026-10-09 | [2026-10-09-phase1-slab-baseline.md](2026-10-09-phase1-slab-baseline.md) | PageSlab extraction/build (task 1.3) |
+| 2026-10-09 | [2026-10-09-phase1-mmap-baseline.md](2026-10-09-phase1-mmap-baseline.md) | MmapHandle traversal + environment ceiling (task 1.1) |
 | 2026-10-09 | [2026-10-09-phase0-arena-baseline.md](2026-10-09-phase0-arena-baseline.md) | BumpArena (task 1.2 authoritative measurement) |

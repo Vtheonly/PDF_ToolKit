@@ -6,6 +6,57 @@ for end users.
 
 ---
 
+## 2026-10-09 — Session 3 (cont.): issue-1/task-2.3 done (zero-copy lexer + bench_lexer)
+
+* **ZeroCopyLexer landed (audit task 2.3):**
+  `native/include/pdftoolkit/parser/lexer.hpp` +
+  `native/src/parser/lexer.cpp`. Emits the audit's `PdfToken` verbatim
+  (plus `EndOfFile` — the audit's enum list has no exhaustion state, an
+  underspecification noted in the registry). Zero-copy `string_view`
+  values into the caller's buffer; raw semantics documented (strings
+  keep parentheses/escapes, names keep `#`-escapes — decoding needs a
+  copy and is deferred to consumers).
+* **Branchless 256-entry LUT exactly as prescribed:** `alignas(64)`
+  whitespace table driving separator/comment skipping; the
+  classification rules stay single-sourced in scan_util.hpp (the LUT
+  materializes them for the hot loop).
+* **Number handling:** locale-independent `std::from_chars` (int64 with
+  PDF-legal leading `+` that from_chars itself rejects for integers —
+  skipped manually; saturating overflow), int/real classification by
+  syntax scan, raw values always preserved; garbage suffixes tolerated.
+* **Tolerant skips are ITERATIVE — a design review catch:** the first
+  formulation recursed for stray `>`/`{`/`}` bytes; a hostile
+  megabyte-long brace run would have overflowed the stack. Regression-
+  locked (`junk_runs_do_not_recurse_or_hang`, 1 MB of `{`).
+* **Stream contract:** `stream`/`endstream` arrive as the audit's
+  StreamStart/StreamEnd; after StreamStart the CALLER owns payload
+  positioning (offset() + skip-one-EOL; resume by constructing a fresh
+  lexer over the suffix) — the lexer never scans binary payload for
+  `endstream`. Test-locked.
+* **`pdtk_bench_lexer` landed** (the audit's `bench_lexer` slot,
+  component-exists map): content mix 350.7 MB/s mean (67.7 M tokens/s,
+  P50/P90/P99 350.8/352.6/353.2 MB/s, CV 0.6 %), string-heavy 833.3
+  MB/s, control traversal 4.586 GB/s — **the 2.5 GB/s gate is honestly
+  UNMET (P-018)**: at ~5 bytes/token the gate needs ~6 cycles/token,
+  which is SIMD-classification territory (task 4.3's technology), not a
+  scalar token-at-a-time lexer. Recording (with the same-run control
+  and the full analysis):
+  `docs/benchmarks/2026-10-09-phase2-lexer-baseline.md`.
+* **U-012 sharpened:** the sandbox ceiling is RUN-dependent, not just
+  environment-dependent — the same-day control moved 2.40–2.85 →
+  4.50–4.78 GB/s (~1.7×). Rule recorded: never ratio a component
+  against a control from an earlier session; re-measure both in one
+  run.
+* **Docs hygiene:** the benchmarks ledger index was missing the
+  session-2 mmap and slab recordings — rows added.
+* **Verification matrix (all 2026-10-09):** release zero-warning + ctest
+  **11/11** (the new `lexer` ctest grows the suite from 10); debug
+  11/11; asan+ubsan 10/10 (incl. 200 hostile random buffers, re-lexed
+  deterministically); tsan 10/10; offline (no FetchContent) 11/11;
+  Python 644 passed.
+
+---
+
 ## 2026-10-09 — Session 3 (cont.): issue-1/task-2.2 done (dual-mode XRef resolver)
 
 * **XRefIndex landed (audit task 2.2):**

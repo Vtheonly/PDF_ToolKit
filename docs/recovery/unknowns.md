@@ -180,3 +180,9 @@ entry resolved with a pointer.
   absolute number, and mark gate pass/fail as environment-bound unless a
   self-hosted runner is available. The durable cross-environment metric
   for task 1.1 is already recorded (mmap retains ~88–90 % of heap speed).
+* **Update (2026-10-09, task 2.3):** the ceiling itself is RUN-DEPENDENT,
+  not just environment-dependent: the same day, the phase-1 control
+  measured 2.40–2.85 GB/s while the task-2.3 control measured
+  4.50–4.78 GB/s (~1.7×). Always re-measure the control in the SAME run
+  as the gated component (the lexer baseline does exactly this); never
+  ratio a component against a control from an earlier session.

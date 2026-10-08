@@ -248,6 +248,37 @@ history — do not delete them.
 * **Status:** `open` (audit text amendment outstanding; code side done,
   verified under ASan+UBSan and TSan).
 
+## P-018 — Audit task-2.3's 2.5 GB/s throughput gate is unreachable by the scalar design the same task prescribes (audit defect)
+
+* **Where:** `docs/issues.md` (issue #1), Task 2.3 acceptance:
+  "Tokenization throughput exceeds 2.5 GB/s on uncompressed streams."
+* **What:** the task prescribes a scalar, token-at-a-time lexer
+  (256-entry LUT, PdfToken stream) and then gates it at 2.5 GB/s. The
+  implemented lexer measures **350.7 MB/s** at 67.7 M tokens/s (~14.7
+  ns ≈ 45 cycles/token — consistent with the prescribed design; the
+  same-run traversal control measured 4.59 GB/s, so this is not
+  primarily an environment ceiling). Meeting the gate at this token
+  density needs ~6 cycles/token — SIMD byte classification (32+ bytes
+  per instruction), which the audit itself introduces only in task 4.3
+  (AVX2/NEON). The gate is scheduled before the technology that can
+  satisfy it — same planning-defect class as P-012/P-017a.
+* **Verified:** `scripts/run_perf.sh --json build/lexer-reports
+  build/release/native/benchmarks/pdtk_bench_lexer` (2026-10-09, 10
+  repetitions, percentiles by nearest-rank): content mix 350.7 MB/s
+  mean (P50 350.8 / P90 352.6 / P99 353.2, CV 0.6 %); string-heavy
+  833.3 MB/s; control 4.586 GB/s. Recording:
+  `docs/benchmarks/2026-10-09-phase2-lexer-baseline.md`.
+* **Resolution:** the lexer is done and test-locked (18/18 cases; the
+  correctness contract is not affected). The GATE is recorded as unmet
+  with its blocker; the durable metrics are tokens/s, cycles/token and
+  the control ratio. The audit's 800 MB/s Flate gate (task 2.4) is
+  reachable and unaffected.
+* **Action for the audit owner:** re-scope task 2.3's acceptance
+  (tokens/s, or a fraction-of-traversal ratio) or move the GB/s figure
+  to the task-4.3 SIMD rewrite of the token stream.
+* **Status:** `open` (audit text amendment outstanding; code side done,
+  measured and recorded).
+
 ## P-017 — Audit task-2.2 has a dependency inversion and an underspecified data structure (audit defects)
 
 * **Where:** `docs/issues.md` (issue #1), Task 2.2.
