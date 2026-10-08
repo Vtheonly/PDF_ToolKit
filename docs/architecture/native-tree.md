@@ -1,7 +1,7 @@
 # Native Engine — Target Tree & Coexistence Model (issue #1)
 
 Status: **Phase 0 + Phase 1 landed (tasks 0.1–0.3, 1.1–1.3 done); Phase 2
-opened (task 2.1 done)**. The Python engine remains the authoritative
+underway (tasks 2.1 + 2.2 done)**. The Python engine remains the authoritative
 implementation until the native core reaches parity and the audit's
 performance gates pass (AGENTS.md §5.6).
 
@@ -9,7 +9,7 @@ performance gates pass (AGENTS.md §5.6).
 
 ```
 native/
-├── CMakeLists.txt              real build logic: 4 targets + 9 ctests + benchmarks
+├── CMakeLists.txt              real build logic: 4 targets + 10 ctests + benchmarks
 │                               (PDTK_ENABLE_BENCHMARKS, default ON — ADR-0005;
 │                               POSITION_INDEPENDENT_CODE ON — TLS in the .so, ADR-0006)
 ├── cmake/CompilerWarnings.cmake  zero-warning profile (-Werror)
@@ -26,9 +26,11 @@ native/
 │   │                           reserved[12] corrected to [8], P-015), builder +
 │   │                           zero-copy PageSlabView (task 1.3 done)
 │   └── parser/
-│       └── trailer.hpp         locate_startxref + TrailerInfo (task 2.1 done —
-│                               tail_window tunable per P-016; tests-only
-│                               detail::set_search_force_scalar hook)
+│       ├── trailer.hpp         locate_startxref + TrailerInfo (task 2.1 done —
+│       │                       tail_window tunable per P-016; tests-only
+│       │                       detail::set_search_force_scalar hook)
+│       └── xref.hpp            XRefIndex + XRefEntry (task 2.2 done — dual-mode
+│                               resolver; from_linear_scan() trust flag)
 ├── src/
 │   ├── core/{version,errors}.cpp
 │   ├── memory/
@@ -38,9 +40,15 @@ native/
 │   │   └── page_slab.cpp       slab builder (32-B-aligned sections, CRC-32) +
 │   │                           view validation (structure; crc pins bytes)
 │   ├── parser/
-│   │   └── trailer.cpp         backward AVX2 (runtime-dispatched) + scalar
-│   │                           needle search; tolerant offset parse;
-│   │                           string/nesting-aware trailer dict extraction
+│   │   ├── scan_util.hpp       INTERNAL shared primitives: char classes,
+│   │   │                       string/array/dict skippers, skip_value,
+│   │   │                       for_each_dict_entry (2.1+2.2 reuse; 2.3 seed)
+│   │   ├── trailer.cpp         backward AVX2 (runtime-dispatched) + scalar
+│   │   │                       needle search; tolerant offset parse;
+│   │   │                       string/nesting-aware trailer dict extraction
+│   │   └── xref.cpp            classic tables + xref streams (/W, /Index,
+│   │                           type 0/1/2) + /Prev chains + /XRefStm hybrids
+│   │                           + emergency linear scan + 10M-object cap
 │   ├── ffi/pdftoolkit.cpp      EngineHandle + C-ABI implementations;
 │   │                           register_document mmaps via MmapHandle (task 1.1)
 │   ├── python/pdftoolkit_native.cpp  raw C-API extension module
@@ -52,8 +60,10 @@ native/
 └── tests/                      minimal harness (ADR-0003; migration deferred, U-009)
     ├── test_mmap.cpp           15 cases: truncation acceptance + honesty contract
     ├── test_slab.cpp           16 cases: alignment acceptance + tamper detection
-    └── test_trailer.cpp        31 cases: 10k-document acceptance corpus (×2 for
-                                SIMD/scalar differential) + mmap zero-copy proof
+    ├── test_trailer.cpp        31 cases: 10k-document acceptance corpus (×2 for
+    │                           SIMD/scalar differential) + mmap zero-copy proof
+    └── test_xref.cpp           18 cases: 2k-document corpus (classic/incremental/
+                                linearized/stream/hybrid/corrupt/Flate) + OOM guard
 ```
 
 Sibling directories from the same audit task (not native code, so they
@@ -64,8 +74,8 @@ scripts/run_perf.sh            benchmark runner + perf stat stage (see U-010)
 docs/benchmarks/                recorded results — the only citable perf numbers
 ```
 
-Verified: zero-warning build (GCC 14.2, C++20), ctest 9/9 (release;
-the sanitizer presets run 8/8 — python_import_smoke is excluded there
+Verified: zero-warning build (GCC 14.2, C++20), ctest 10/10 (release;
+the sanitizer presets run 9/9 — python_import_smoke is excluded there
 by design),
 `nm -D` shows exactly the 6 C symbols exported from the FFI library,
 extension imports from Python, CLI runs. Guarded-mmap acceptance:
@@ -76,7 +86,12 @@ one cache line after the P-015 correction). Trailer-scanner acceptance:
 10,000-document deterministic corpus with variable whitespace and
 trailing junk, offsets + `/Root` + `/Prev` all asserted, SIMD and scalar
 paths agreeing (task 2.1, test-locked; synthetic-corpus interpretation
-U-013, window tunable P-016).
+U-013, window tunable P-016). XRef acceptance: 2,000-document corpus
+across classic tables, incremental /Prev chains, linearized-style
+layouts, xref streams, hybrid /XRefStm files, corrupt tables and Flate
+degradation — every expected entry asserted, emergency linear scan
+flagged (task 2.2, test-locked; Flate dependency inversion P-017,
+vector<uint64_t> underspecification P-017b).
 
 ## Isolation model (ADR-0002)
 
@@ -127,7 +142,7 @@ native/include/pdftoolkit/
 ├── errors.hpp                     (task 0.1 — ErrorCode enum, C-mappable)
 ├── pdftoolkit.h                   (task 7.1 — pure C-ABI header)
 ├── memory/   mmap.hpp (1.1 done) · arena.hpp (1.2 done) · page_slab.hpp (1.3 done)
-├── parser/   trailer.hpp (2.1 done) · xref.hpp (2.2) · lexer.hpp (2.3)
+├── parser/   trailer.hpp (2.1 done) · xref.hpp (2.2 done) · lexer.hpp (2.3)
 ├── codec/    flate.hpp (2.4)
 ├── font/     cmap.hpp (3.1)
 ├── layout/   evaluator.hpp (3.2) · materializer.hpp (3.3)

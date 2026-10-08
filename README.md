@@ -130,9 +130,11 @@ re-architecture from Python wrapper to high-throughput systems engine.
 The Python engine above remains the authoritative implementation until
 the native core reaches parity. Current state: Phase 0 complete; the
 Phase 1 memory subsystem (tasks 1.1 guarded `MmapHandle`, 1.2
-`BumpArena`, 1.3 Unified Page Slab) done and measured; Phase 2 opened
-with the backward `startxref`/trailer scanner (task 2.1, SIMD
-needle-matched, 10,000-document acceptance corpus).
+`BumpArena`, 1.3 Unified Page Slab) done and measured; Phase 2 underway
+— the backward `startxref`/trailer scanner (task 2.1, SIMD
+needle-matched, 10,000-document acceptance corpus) and the dual-mode
+XRef resolver (task 2.2: classic tables, PDF 1.5+ xref streams, /Prev
+chains, corrupt-file linear-scan recovery; 2,000-document corpus).
 
 ```bash
 cmake --preset release -DPython3_EXECUTABLE=$(which python)  # needs cmake+ninja

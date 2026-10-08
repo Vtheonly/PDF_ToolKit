@@ -17,6 +17,8 @@
 
 #include <cstring>
 
+#include "scan_util.hpp"  // shared parser primitives (internal, task 2.2 reuse)
+
 #if defined(__x86_64__) && defined(__GNUC__)
 #include <immintrin.h>
 #define PDTK_TRAILER_AVX2_RUNTIME 1
@@ -29,29 +31,11 @@
 namespace pdftoolkit::parser {
 namespace {
 
-constexpr std::size_t kNpos = static_cast<std::size_t>(-1);
-
-// PDF whitespace (ISO 32000 §7.2): NUL, TAB, LF, FF, CR, SP.
-constexpr bool is_ws(std::uint8_t c) noexcept {
-    return c == 0x00 || c == 0x09 || c == 0x0A || c == 0x0C || c == 0x0D ||
-           c == 0x20;
-}
-
-// PDF delimiters (ISO 32000 §7.2).
-constexpr bool is_delimiter(std::uint8_t c) noexcept {
-    return c == '(' || c == ')' || c == '<' || c == '>' || c == '[' ||
-           c == ']' || c == '{' || c == '}' || c == '/' || c == '%';
-}
-
-// A "regular" character: neither whitespace nor a delimiter — the only
-// characters allowed inside keywords and names.
-constexpr bool is_regular(std::uint8_t c) noexcept {
-    return !is_ws(c) && !is_delimiter(c);
-}
-
-constexpr bool is_digit(std::uint8_t c) noexcept {
-    return c >= '0' && c <= '9';
-}
+using scan::kNpos;
+using scan::is_ws;
+using scan::is_delimiter;
+using scan::is_regular;
+using scan::matching_dict_close;
 
 bool g_force_scalar = false;
 
@@ -126,281 +110,69 @@ std::size_t highest_s_below(const std::uint8_t* data, std::size_t lo,
 }
 
 // ---------------------------------------------------------------------------
-// Unsigned decimal parser. Returns true and sets `value` when [pos, end)
-// starts with at least one digit, the number fits in uint64_t, and the
-// number is terminated by whitespace, a delimiter or end-of-buffer (the
-// PDF integer token rule — e.g. `123%%EOF` is the integer 123 followed
-// by a comment). A leading '+' is tolerated (legal PDF integer syntax);
-// a leading '-' is not (offsets are byte positions and cannot be
-// negative). `pos` is advanced past the number on success only.
-// ---------------------------------------------------------------------------
-bool parse_u64(const std::uint8_t* d, std::size_t& pos, std::size_t end,
-               std::uint64_t& value) noexcept {
-    std::size_t q = pos;
-    if (q < end && d[q] == static_cast<std::uint8_t>('+')) {
-        ++q;
-    }
-    if (q >= end || !is_digit(d[q])) {
-        return false;
-    }
-    std::uint64_t acc = 0;
-    while (q < end && is_digit(d[q])) {
-        const std::uint64_t digit =
-            static_cast<std::uint64_t>(d[q] - static_cast<std::uint8_t>('0'));
-        if (acc > (UINT64_MAX - digit) / 10) {
-            return false;  // overflow: >20 digits cannot be a file offset
-        }
-        acc = acc * 10 + digit;
-        ++q;
-    }
-    if (q < end && !is_ws(d[q]) && !is_delimiter(d[q])) {
-        return false;  // "123x" — the token continues; not a clean integer
-    }
-    value = acc;
-    pos = q;
-    return true;
-}
-
-// Unsigned decimal parser clamped to uint32_t (object / generation
-// numbers). Same terminator rules as parse_u64.
-bool parse_u32(const std::uint8_t* d, std::size_t& pos, std::size_t end,
-               std::uint32_t& value) noexcept {
-    std::size_t q = pos;
-    if (q < end && d[q] == static_cast<std::uint8_t>('+')) {
-        ++q;
-    }
-    if (q >= end || !is_digit(d[q])) {
-        return false;
-    }
-    std::uint64_t acc = 0;
-    while (q < end && is_digit(d[q])) {
-        const std::uint64_t digit =
-            static_cast<std::uint64_t>(d[q] - static_cast<std::uint8_t>('0'));
-        if (acc > (UINT64_MAX - digit) / 10) {
-            return false;
-        }
-        acc = acc * 10 + digit;
-        ++q;
-    }
-    if (q < end && !is_ws(d[q]) && !is_delimiter(d[q])) {
-        return false;
-    }
-    if (acc > UINT32_MAX) {
-        return false;
-    }
-    value = static_cast<std::uint32_t>(acc);
-    pos = q;
-    return true;
-}
-
-// ---------------------------------------------------------------------------
-// String-aware forward scanning helpers (shared by the dictionary
-// re-verification and the /Root & /Prev extraction).
-// ---------------------------------------------------------------------------
-
-// Skips a literal string starting at the '(' at `pos`. Returns the
-// position just past the matching ')' (handles balanced parens and
-// backslash escapes), or kNpos when the string is unterminated.
-std::size_t skip_literal_string(const std::uint8_t* d, std::size_t pos,
-                                std::size_t end) noexcept {
-    std::size_t q = pos + 1;
-    unsigned depth = 1;
-    while (q < end && depth > 0) {
-        if (d[q] == static_cast<std::uint8_t>('\\')) {
-            q += 2;
-            continue;
-        }
-        if (d[q] == static_cast<std::uint8_t>('(')) {
-            ++depth;
-        } else if (d[q] == static_cast<std::uint8_t>(')')) {
-            --depth;
-        }
-        ++q;
-    }
-    return depth == 0 ? q : kNpos;
-}
-
-// Skips a hex string starting at the '<' at `pos` (a "<<" dict open must
-// be consumed by the caller before this is reached). Returns the
-// position just past the closing '>', or kNpos when unterminated.
-std::size_t skip_hex_string(const std::uint8_t* d, std::size_t pos,
-                            std::size_t end) noexcept {
-    std::size_t q = pos + 1;
-    while (q < end && d[q] != static_cast<std::uint8_t>('>')) {
-        ++q;
-    }
-    return q < end ? q + 1 : kNpos;
-}
-
-// Given the position of the opening "<<" at `pos`, returns the position
-// OF the first '>' of the matching ">>" — with literal/hex strings and
-// nested dictionaries handled — or kNpos when unbalanced.
-std::size_t matching_dict_close(const std::uint8_t* d, std::size_t pos,
-                                std::size_t end) noexcept {
-    std::size_t q = pos + 2;
-    unsigned depth = 1;
-    while (q < end) {
-        const std::uint8_t c = d[q];
-        if (c == static_cast<std::uint8_t>('(')) {
-            q = skip_literal_string(d, q, end);
-            if (q == kNpos) {
-                return kNpos;
-            }
-        } else if (c == static_cast<std::uint8_t>('<')) {
-            if (q + 1 < end && d[q + 1] == static_cast<std::uint8_t>('<')) {
-                ++depth;
-                q += 2;
-            } else {
-                q = skip_hex_string(d, q, end);
-                if (q == kNpos) {
-                    return kNpos;
-                }
-            }
-        } else if (c == static_cast<std::uint8_t>('>')) {
-            if (q + 1 < end && d[q + 1] == static_cast<std::uint8_t>('>')) {
-                --depth;
-                if (depth == 0) {
-                    return q;
-                }
-                q += 2;
-            } else {
-                return kNpos;  // stray '>' outside any string: malformed
-            }
-        } else {
-            ++q;
-        }
-    }
-    return kNpos;
-}
-
-// ---------------------------------------------------------------------------
 // Trailer dictionary extraction (best-effort; never produces wrong data).
 // ---------------------------------------------------------------------------
 
-// Walks the dictionary body [pos, end) (the brackets excluded), skipping
-// strings, nested dictionaries and comments, and records /Root and /Prev
-// at nesting depth 1 only. Decoys inside strings or nested dictionaries
-// are invisible by construction.
+// Extracts /Root and /Prev from the dictionary body [pos, end) via the
+// shared string-aware, nesting-aware walker (scan_util.hpp) — decoys
+// inside strings or nested dictionaries are invisible by construction.
+// First occurrence of each key wins; malformed values are recorded as
+// absent, never as wrong data.
 void extract_root_and_prev(const std::uint8_t* d, std::size_t pos,
                            std::size_t end, TrailerInfo& info) noexcept {
-    std::size_t q = pos;
-    unsigned depth = 1;  // inside the dictionary whose body we walk
-    while (q < end) {
-        const std::uint8_t c = d[q];
-        if (c == static_cast<std::uint8_t>('(')) {
-            q = skip_literal_string(d, q, end);
-            if (q == kNpos) {
-                return;
-            }
-        } else if (c == static_cast<std::uint8_t>('<')) {
-            if (q + 1 < end && d[q + 1] == static_cast<std::uint8_t>('<')) {
-                ++depth;
-                q += 2;
-            } else {
-                q = skip_hex_string(d, q, end);
-                if (q == kNpos) {
-                    return;
-                }
-            }
-        } else if (c == static_cast<std::uint8_t>('>')) {
-            if (q + 1 < end && d[q + 1] == static_cast<std::uint8_t>('>')) {
-                --depth;
-                if (depth == 0) {
-                    return;  // body end reached
-                }
-                q += 2;
-            } else {
-                return;
-            }
-        } else if (c == static_cast<std::uint8_t>('%')) {
-            while (q < end && d[q] != static_cast<std::uint8_t>('\n') &&
-                   d[q] != static_cast<std::uint8_t>('\r')) {
-                ++q;
-            }
-        } else if (c == static_cast<std::uint8_t>('/')) {
-            const std::size_t name_start = ++q;
-            while (q < end && is_regular(d[q])) {
-                ++q;
-            }
-            const std::size_t name_len = q - name_start;
-            if (depth != 1) {
-                continue;  // name inside a nested dictionary: not ours
-            }
-            if (name_len == 4 &&
-                std::memcmp(d + name_start, "Root", 4) == 0 && !info.has_root) {
+    scan::for_each_dict_entry(
+        d, pos, end,
+        [&](std::string_view key, std::size_t vp, std::size_t ve) {
+            if (key == "Root" && !info.has_root) {
                 // `/Root <obj> <gen> R`, each token separated by at least
                 // one whitespace (PDF token syntax).
-                std::size_t r = q;
-                while (r < end && is_ws(d[r])) {
-                    ++r;
-                }
+                std::size_t q = scan::skip_ws_and_comments(d, vp, ve);
                 std::uint32_t obj = 0;
                 std::uint32_t gen = 0;
-                if (!parse_u32(d, r, end, obj)) {
-                    continue;
+                if (!scan::parse_u32(d, q, ve, obj)) {
+                    return;
                 }
-                const std::size_t after_obj = r;
-                std::size_t s = r;
-                while (s < end && is_ws(d[s])) {
-                    ++s;
-                }
+                const std::size_t after_obj = q;
+                std::size_t s = scan::skip_ws_and_comments(d, q, ve);
                 if (s == after_obj) {
-                    continue;  // tokens must be whitespace-separated
+                    return;  // tokens must be whitespace-separated
                 }
-                if (!parse_u32(d, s, end, gen)) {
-                    continue;
+                if (!scan::parse_u32(d, s, ve, gen)) {
+                    return;
                 }
                 const std::size_t after_gen = s;
-                std::size_t t = s;
-                while (t < end && is_ws(d[t])) {
-                    ++t;
-                }
-                if (t == after_gen || t >= end ||
+                std::size_t t = scan::skip_ws_and_comments(d, s, ve);
+                if (t == after_gen || t >= ve ||
                     d[t] != static_cast<std::uint8_t>('R') ||
-                    (t + 1 < end && is_regular(d[t + 1]))) {
-                    continue;  // must be the keyword R, terminated
+                    (t + 1 < ve && is_regular(d[t + 1]))) {
+                    return;  // must be the keyword R, terminated
                 }
                 info.has_root = true;
                 info.root_object = obj;
                 info.root_generation = gen;
-                q = t + 1;
-            } else if (name_len == 4 &&
-                       std::memcmp(d + name_start, "Prev", 4) == 0 &&
-                       !info.has_prev) {
-                std::size_t r = q;
-                while (r < end && is_ws(d[r])) {
-                    ++r;
-                }
+            } else if (key == "Prev" && !info.has_prev) {
+                std::size_t q = scan::skip_ws_and_comments(d, vp, ve);
                 std::uint64_t prev = 0;
-                if (!parse_u64(d, r, end, prev)) {
-                    continue;
+                if (!scan::parse_u64(d, q, ve, prev)) {
+                    return;
                 }
                 // `/Prev` must be a plain integer; an indirect reference
                 // (`/Prev 4 0 R`, broken files) is recorded as absent.
-                std::size_t s = r;
-                while (s < end && is_ws(d[s])) {
-                    ++s;
-                }
+                std::size_t s = scan::skip_ws_and_comments(d, q, ve);
                 std::size_t probe = s;
                 std::uint32_t dummy = 0;
-                if (s < end && is_digit(d[s]) && parse_u32(d, probe, end, dummy)) {
-                    std::size_t t = probe;
-                    while (t < end && is_ws(d[t])) {
-                        ++t;
-                    }
-                    if (t < end && d[t] == static_cast<std::uint8_t>('R') &&
-                        (t + 1 >= end || !is_regular(d[t + 1]))) {
-                        continue;  // indirect reference, not an offset
+                if (s < ve && scan::is_digit(d[s]) &&
+                    scan::parse_u32(d, probe, ve, dummy)) {
+                    std::size_t t = scan::skip_ws_and_comments(d, probe, ve);
+                    if (t < ve && d[t] == static_cast<std::uint8_t>('R') &&
+                        (t + 1 >= ve || !is_regular(d[t + 1]))) {
+                        return;  // indirect reference, not an offset
                     }
                 }
                 info.has_prev = true;
                 info.prev_offset = prev;
-                q = s;
             }
-        } else {
-            ++q;
-        }
-    }
+        });
 }
 
 // Locates the classic trailer dictionary ending just before the
@@ -530,7 +302,7 @@ TrailerInfo locate_startxref(std::span<const std::uint8_t> bytes,
             ++q;
         }
         std::uint64_t offset = 0;
-        if (!parse_u64(d, q, size, offset)) {
+        if (!scan::parse_u64(d, q, size, offset)) {
             continue;  // tolerant: try the next candidate further back
         }
 

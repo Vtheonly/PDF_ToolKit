@@ -6,6 +6,60 @@ for end users.
 
 ---
 
+## 2026-10-09 — Session 3 (cont.): issue-1/task-2.2 done (dual-mode XRef resolver)
+
+* **XRefIndex landed (audit task 2.2):**
+  `native/include/pdftoolkit/parser/xref.hpp` +
+  `native/src/parser/xref.cpp`. One entry point —
+  `XRefIndex::from_document(bytes, tail_window)` — composes 2.1's
+  `locate_startxref`, resolves the cross-reference structure it names
+  and builds the contiguous id-indexed table. Classic plaintext tables
+  (multi-subsection, tolerant entry parsing), `/Prev` chains with
+  newest-entry-wins merge semantics (a newer FREE entry sticks — the
+  object was deleted by that update), cycle-guarded and depth-capped,
+  XRef streams with variable-width `/W` fields (w1=0 default-type
+  included), `/Index` ranges, type 0/1/2 rows, big-endian fields up to
+  8 bytes, `/Length` consistency validation, hybrid `/XRefStm`
+  companions (classic-first precedence), and the audit's emergency
+  linear scan over `N G obj` headers (later occurrence wins — matches
+  incremental-update restatements; flagged via `from_linear_scan()`).
+* **Flate honesty (P-017a):** most real PDF 1.5+ xref streams are
+  FlateDecode-filtered and unparseable until task 2.4's decompressor.
+  A Flate newest section degrades to the linear scan — a genuine
+  partial index (all stand-alone objects found; objects compressed
+  inside ObjStms are invisible to any header scan) — instead of a
+  failure or, worse, a faked success.
+* **Hardening:** a 10-million-object cap refuses subsection/`/Index`
+  ids beyond it (a hostile "4294967290 5" subsection header would
+  otherwise materialize a ~100 GB vector — refused, not OOM'd;
+  test-locked), and chain walking is capped at 4096 links.
+* **scan_util.hpp extracted (extend, never fork):** trailer.cpp's
+  character classes, string/dict skippers and number parsers moved to
+  the internal header `native/src/parser/scan_util.hpp`, which xref.cpp
+  builds on. Two real bugs were found and fixed in the shared walker
+  along the way, both caught by suites: (1) the last dictionary entry
+  was silently dropped when the walked range excludes the closing `>>`
+  (body-only ranges never hit the depth-0 emit — fixed with an
+  emit-on-range-end); (2) a name VALUE (`/Type /XRef`) was mistaken
+  for the next KEY, eating the value — fixed by adding `skip_value`,
+  a syntactic value skipper (names, strings, arrays, nested dicts)
+  that the walker applies after each key. Task 2.3's lexer should
+  absorb these primitives when it lands.
+* **Acceptance criterion met:** "correctly parses both classical tables
+  and compressed streams, verified against a test corpus containing
+  corrupt and linearized PDFs" — a 2,000-document deterministic corpus
+  spanning classic / incremental-update / linearized-style / stream /
+  hybrid / corrupt / Flate documents, every expected entry (kind,
+  offset, generation, objstm fields) asserted; 18/18 test cases
+  including the mmap composition proof. The `vector<uint64_t>`
+  underspecification is P-017b.
+* **Verification matrix (all 2026-10-09):** release zero-warning + ctest
+  **10/10** (the new `xref` ctest grows the suite from 9); debug 10/10;
+  asan+ubsan 9/9; tsan 9/9; offline (no FetchContent) 10/10; Python 644
+  passed.
+
+---
+
 ## 2026-10-09 — Session 3: issue-1/task-2.1 done (backward startxref & trailer scanner)
 
 * **Phase 2 opened (audit task 2.1):**

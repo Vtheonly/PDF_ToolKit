@@ -248,6 +248,38 @@ history — do not delete them.
 * **Status:** `open` (audit text amendment outstanding; code side done,
   verified under ASan+UBSan and TSan).
 
+## P-017 — Audit task-2.2 has a dependency inversion and an underspecified data structure (audit defects)
+
+* **Where:** `docs/issues.md` (issue #1), Task 2.2.
+* **What (a — dependency inversion, same class as P-012):** step 3 asks
+  the resolver to "Parse compressed XRef streams (PDF 1.5+ /Type /XRef
+  streams with variable-width field decoding)" with the dependency line
+  naming only Tasks 2.1 and 1.2 — but real PDF 1.5+ xref streams are
+  almost always **FlateDecode-filtered**, and the decompressor arrives
+  with Task 2.4 (`libdeflater`). As written, task 2.2's acceptance
+  ("correctly parses ... compressed streams") is unsatisfiable for the
+  files the feature exists for until 2.4 lands.
+* **What (b — underspecified structure):** step 4 mandates
+  `std::vector<uint64_t>` indexed by object id, but step 3 requires
+  parsing type-2 (compressed, in-ObjStm) entries, which need the
+  containing object number AND the index within it — two more fields
+  than a uint64 can carry (plus generation for types 0/1).
+* **Resolution implemented (2026-10-09):** (a) the resolver parses
+  UNFILTERED xref streams fully; a Flate-filtered NEWEST section degrades
+  honestly to the emergency linear scan (flagged via
+  `XRefIndex::from_linear_scan()`), which still finds every stand-alone
+  object; when task 2.4 lands, the stream path becomes first-class by
+  feeding the decompressor's output to the same row decoder. (b)
+  `std::vector<XRefEntry>` (a compact POD with Kind/offset/generation/
+  objstm_object/index_in_objstm) — the audit's intent (O(1) id-indexed
+  lookup) is preserved, the representation extended to what step 3
+  requires.
+* **Action for the audit owner:** amend task 2.2 in `docs/issues.md` /
+  issue #1 — add task 2.4 to the dependency line (or mark Flate streams
+  as 2.4 scope) and correct the lookup-table type.
+* **Status:** `open` (audit text amendment outstanding; code side done,
+  test-locked — including the Flate degradation case in the corpus).
+
 ## P-016 — Audit task-2.1 hard-codes the backward-scan window at 1024 bytes (audit limitation)
 
 * **Where:** `docs/issues.md` (issue #1), Task 2.1 step 2: "Scan the last

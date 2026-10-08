@@ -41,7 +41,7 @@ issue #1). Pre-issues use the `T-NNN` prefix.
 | ID | Task | Status | Evidence / Notes |
 |----|------|--------|------------------|
 | issue-1/task-2.1 | Zero-copy backward `startxref` & trailer scanner | `done` | `native/{include/pdftoolkit/parser/trailer.hpp, src/parser/trailer.cpp}` per audit spec (ADR-0002 path mapping). Backward SIMD needle search (`_mm256_cmpeq_epi8` vs 's') runtime-dispatched (AVX2 target attribute + `__builtin_cpu_supports`; scalar fallback, differential-tested); tolerant candidate validation (last valid `startxref` wins; near-miss decoys skipped); 64-bit offset parse (overflow-checked, `+`-sign and delimiter-terminated per PDF token grammar); string-aware, nesting-aware trailer-dict extraction (`/Root` + `/Prev`; decoys inside literal/hex strings and nested dictionaries ignored by construction). **Acceptance met**: "correct offset identification across 10,000 PDF test files with variable whitespace and trailing junk" — 10,000 deterministic synthetic documents (LCG-varied ws mix incl. \r\n/\t/\f/NUL, trailing junk up to 300 B with 's'-dense bytes and injected near-miss decoys, /Root ±, /Prev ±, XRef-stream-style every 11th), each asserted on offset + /Root + /Prev + dict view; corpus run twice (SIMD and forced scalar — paths agree). 31/31 cases incl. mmap-composition zero-copy proof. Matrix (2026-10-09): release zero-warning ctest **9/9**, debug 9/9, asan+ubsan 8/8, tsan 8/8, offline (no FetchContent) 9/9, Python 644. Audit's fixed 1024-B window parameterized (`tail_window`, default per audit) — P-016; synthetic-corpus interpretation — U-013. **Live CI green on 0f87953** (run 37846501597, 5/5 jobs incl. the benchmark step and the new trailer ctest under ASan/TSan). |
-| issue-1/task-2.2 | Dual-mode XRef table & stream resolver | `pending` | Depends on 2.1, 1.2. |
+| issue-1/task-2.2 | Dual-mode XRef table & stream resolver | `done` | `native/{include/pdftoolkit/parser/xref.hpp, src/parser/xref.cpp}`: `XRefIndex::from_document(span, tail_window)` -> contiguous `vector<XRefEntry>` (Free/InUse/Compressed) indexed by object id. Classic tables (multi-subsection, tolerant 20-byte entries), `/Prev` chains (newest-wins merge incl. free-sticks deletions; cycle-guarded, broken-older stops chain without fallback), XRef **streams** (variable-width `/W` incl. w1=0 default-type, `/Index` ranges, type 0/1/2 rows, 64-bit BE fields, `/Length` consistency check), hybrid `/XRefStm` companions (classic-first precedence), and the audit's emergency linear scan for `N G obj` headers (later-occurrence-wins; flagged via `from_linear_scan()`). **Flate honesty (P-017):** Flate-filtered newest sections degrade to the linear scan until task 2.4's decompressor lands. **Hardening:** 10M-object cap refuses hostile `/Index`/subsection ids (no OOM vector materialization), 4096-link chain cap. **Acceptance met:** 2,000-document deterministic corpus (classic/incremental/linearized-style/stream/hybrid/corrupt/Flate — every expected entry asserted: kind+offset+gen+objstm fields; `acceptance_corpus_two_thousand_documents`, 18/18 cases incl. mmap composition). Audit's `vector<uint64_t>` cannot represent type-2 entries — P-017b. Matrix (2026-10-09): release zero-warning ctest **10/10**, debug 10/10, asan+ubsan 9/9, tsan 9/9, offline 9→10/10, Python 644. |
 | issue-1/task-2.3 | Zero-copy byte lexer & tokenizer | `pending` | Depends on 1.1. Throughput gate: > 2.5 GB/s. |
 | issue-1/task-2.4 | Hardware-accelerated Flate decompressor | `pending` | Depends on 1.2. Gate: >= 800 MB/s/core. |
 
@@ -95,32 +95,38 @@ issue #1). Pre-issues use the `T-NNN` prefix.
 
 ## Next tasks (recommended order)
 
-1. **issue-1/task-2.2** — dual-mode XRef table & stream resolver (depends
-   on 2.1 done + 1.2 done; both satisfied — Phase 2 continuation). The
-   `TrailerInfo` from 2.1 supplies the entry offset and `/Prev` chain.
-2. **issue-1/task-2.3** — zero-copy lexer (depends on 1.1; throughput gate
+1. **issue-1/task-2.3** — zero-copy lexer (depends on 1.1; throughput gate
    2.5 GB/s must be reported against the environment ceiling per U-012;
-   `bench_lexer` lands with it per the component-exists map, P-012).
+   `bench_lexer` lands with it per the component-exists map, P-012). The
+   `scan_util.hpp` primitives (char classes, value skipper, dict walker)
+   are the natural seed for its tokenization.
+2. **issue-1/task-2.4** — Flate decompressor (libdeflater via
+   FetchContent, ADR-0005 option pattern). Landing it upgrades 2.2's
+   Flate honesty path from linear-scan degradation to first-class xref
+   stream parsing (P-017a).
 3. **MSan-with-clang CI job** (U-002 remainder) — pursue when Phase 2
    code justifies the instrumented-libc++ setup cost.
-4. **P-011/P-012/P-014/P-015/P-016 follow-ups** — audit owner corrects the
-   mis-scaled task-1.2 bound, the task-0.2 dependency inversion, the
-   task-1.1 throw-from-handler wording, the task-1.3 `reserved` padding
-   and the task-2.1 fixed 1024-byte window in `docs/issues.md` / issue #1.
+4. **P-011/P-012/P-014/P-015/P-016/P-017 follow-ups** — audit owner
+   corrects the mis-scaled task-1.2 bound, the task-0.2 dependency
+   inversion, the task-1.1 throw-from-handler wording, the task-1.3
+   `reserved` padding, the task-2.1 fixed 1024-byte window and the
+   task-2.2 Flate dependency + `vector<uint64_t>` underspecification in
+   `docs/issues.md` / issue #1.
 5. **P-012 follow-up** — when landing bench_wand (task 4.2), satisfy the
    audit's original task-0.2 acceptance literally.
 6. **Slab CRC optimization** (deferred; see the phase-1 slab baseline's
    method note) — table-driven or hardware CRC32 if Phase 2/3 ingestion
    makes slab construction hot.
 7. **U-013 follow-up (optional)** — differential-test the native trailer
-   scanner against PyMuPDF over a real-world PDF corpus when one becomes
-   available (the repo deliberately carries no binary fixtures).
+   scanner + xref resolver against PyMuPDF over a real-world PDF corpus
+   when one becomes available (the repo deliberately carries no binary
+   fixtures).
 
 ## Session log
 
 | Date | Session | Tasks progressed |
 |------|---------|------------------|
-| 2026-10-09 | Session 3 (2.1) | Baseline re-verified green (Python 644, release 9/9 — note: counts grew to 9 ctests this session). **issue-1/task-2.1 done**: zero-copy backward startxref/trailer scanner with runtime-dispatched AVX2 needle search + scalar differential test; acceptance met via 10,000-document deterministic synthetic corpus (U-013 records the no-binary-fixtures interpretation); audit's fixed 1024-B window parameterized (P-016); 31/31 test cases incl. mmap zero-copy composition. Matrix: release 9/9 zero-warning, debug 9/9, asan 8/8, tsan 8/8, offline 9/9, Python 644. |
+| 2026-10-09 | Session 3 (2.1 + 2.2) | Baseline re-verified green (Python 644, release 8/8). **issue-1/task-2.1 done**: backward startxref/trailer scanner, runtime-dispatched AVX2 + scalar differential, 10,000-document acceptance corpus (U-013), tail_window parameterized (P-016), 31/31 cases, CI green on 0f87953 (run 37846501597) + evidence commit 78ad1e3. **issue-1/task-2.2 done**: dual-mode XRef resolver — classic tables, /Prev chains (newest-wins, free-sticks, cycle-guarded), xref streams (/W incl. w1=0, /Index, type 0/1/2, 64-bit BE, /Length consistency), hybrid /XRefStm, emergency linear scan (flagged), Flate degradation (P-017), 10M-object OOM hardening; shared scan_util.hpp extracted from trailer.cpp (extend-not-fork; its dict walker gained a syntactic value-skipper after the trailer regression suite caught a name-value/key ambiguity and a dropped-last-entry bug). Acceptance: 2,000-doc corpus, 18/18 cases. Matrix grew to release 10/10 zero-warning, debug 10/10, asan 9/9, tsan 9/9, offline 10/10, Python 644. |
 | 2026-10-09 | Session 2 (0.2 + 1.2 + 1.1 + 1.3) | Baseline re-verified green (Python 644, native 6/6). issue-1/task-0.2 done (pipeline + pdtk_bench_arena + run_perf.sh + CI step; ADR-0005; P-012; U-006 resolved; U-009/U-010 filed; CI green incl. benchmark step, run 37826782644 on 9fb0bbc). issue-1/task-1.2 closed with the authoritative measurement. **issue-1/task-1.1 done**: guarded `MmapHandle` + FFI mmap wiring + `pdtk_bench_mmap` (ADR-0006; P-013 false alarm withdrawn with methodology rule; P-014 filed; U-011/U-012 filed; ADR index gained the missing 0005 row; CI green on 5346a2e run 37833962102). **issue-1/task-1.3 done**: UPS layout + zero-copy PageSlabView + `pdtk_bench_slab` (P-015 audit-defect correction; extraction 0.585 ns/glyph). Verification matrix grew to release 8/8 zero-warning, debug 8/8, asan 7/7, tsan 7/7, offline 8/8, Python 644. |
 | 2026-10-09 | Session 2 (0.2 + 1.2 closure) | Baseline re-verified green (Python 644, native 6/6). issue-1/task-0.2 done (pipeline + pdtk_bench_arena + run_perf.sh + CI step; ADR-0005; P-012; U-006 resolved; U-009/U-010 filed). issue-1/task-1.2 closed with the authoritative measurement. Verification matrix: offline 6/6, asan 5/5, tsan 5/5, debug 6/6, Python 644, YAML/JSON valid. |
 | 2026-10-09 | Session 1 (issue-#1 kickoff) | T-000 verified N/A; T-001..T-004 done; baseline 644/644 green established; issue-1/task-0.1 done; issue-1/task-0.3 done (CI first run pending); issue-1/task-1.2 in progress (arena + 11 tests; benchmark pending 0.2); discoveries P-006..P-011, U-001..U-008 filed; ADR-0001..0004 recorded. |
