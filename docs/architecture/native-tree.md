@@ -1,0 +1,74 @@
+# Native Engine — Target Tree & Coexistence Model (issue #1)
+
+Status: **scaffolding (Phase 0 in progress)**. The Python engine remains
+the authoritative implementation until the native core reaches parity and
+the audit's performance gates pass (AGENTS.md §5.6).
+
+## Isolation model (ADR-0002)
+
+```
+repository root
+├── CMakeLists.txt          ← thin shim: add_subdirectory(native) ONLY
+├── pyproject.toml          ← Python packaging (unchanged)
+├── src/pdftoolkit/         ← Python engine (production)
+└── native/                 ← ALL C++20 code lives here
+    ├── CMakeLists.txt      ← real build logic
+    ├── include/pdftoolkit/ ← public headers (audit: include/pdftoolkit/*)
+    ├── src/                ← implementation (audit: src/*)
+    └── tests/              ← native tests (ctest-registered)
+```
+
+Why: the audit's literal paths (`include/pdftoolkit/...`, `src/memory/...`)
+would collide with the Python package's `src/` layout and setuptools'
+package discovery. Mapping rule (AGENTS.md §5.5):
+
+```
+audit path                    →  repository path
+include/pdftoolkit/X.hpp      →  native/include/pdftoolkit/X.hpp
+src/<module>/X.cpp            →  native/src/<module>/X.cpp
+```
+
+## Build targets (audit Task 0.1)
+
+| Target | Type | Purpose |
+|--------|------|---------|
+| `pdftoolkit_core` | static lib | C++20 systems core (memory, parser, codec, font, layout, index, search, geometry, ops, runtime) |
+| `pdftoolkit_ffi` | shared lib | pure C-ABI surface (`pdftoolkit.h`); exceptions never cross the boundary |
+| `pdftoolkit_py` | Python extension | Buffer-Protocol zero-copy bindings; Phase 0 uses raw C-API (ADR-0003) |
+| `pdftoolkit_cli` | executable | native headless CLI (Arrow IPC / JSON lines on stdout) |
+
+Toolchain: GCC ≥ 13 / Clang ≥ 16 / MSVC 2022, C++20 (`cxx_std_20`).
+Warnings are errors: `-Wall -Wextra -Wpedantic -Wconversion` (GCC/Clang),
+`/W4 /permissive-` (MSVC). Release optimization per audit §Task 0.1
+(`-O3`, optional `-march=native` behind `PDTK_ENABLE_NATIVE_ARCH`, U-003).
+
+## Planned module map (from the audit; populate as phases land)
+
+```
+native/include/pdftoolkit/
+├── version.hpp                    (task 0.1 — version macros)
+├── errors.hpp                     (task 0.1 — ErrorCode enum, C-mappable)
+├── pdftoolkit.h                   (task 7.1 — pure C-ABI header)
+├── memory/   mmap.hpp (1.1) · arena.hpp (1.2) · page_slab.hpp (1.3)
+├── parser/   trailer.hpp (2.1) · xref.hpp (2.2) · lexer.hpp (2.3)
+├── codec/    flate.hpp (2.4)
+├── font/     cmap.hpp (3.1)
+├── layout/   evaluator.hpp (3.2) · materializer.hpp (3.3)
+├── index/    inverted.hpp (4.1)
+├── search/   wand.hpp (4.2) · simd.hpp (4.3)
+├── geometry/ spatial.hpp (4.4)
+├── ops/      plan.hpp (5.1) · writer.hpp (5.2)
+└── runtime/  registry.hpp (6.1) · pool.hpp (6.2) · watchdog.hpp (6.3)
+```
+
+## Coexistence rules
+
+1. **No shared state**: the native core never imports or wraps the Python
+   engine and vice versa; integration happens only at the FFI/extension
+   boundary (Phase 7) or the CLI.
+2. **Additive only**: native scaffolding must never stub, delete or
+   degrade Python capabilities (dos-and-donts.md).
+3. **Honest stubs**: C-ABI functions without backing implementations
+   return `PDTK_ERR_NOT_IMPLEMENTED`; success is never faked.
+4. **Single CMake entry**: the root `CMakeLists.txt` must remain a thin
+   shim so Python tooling (pip/setuptools) is unaffected by C++ builds.

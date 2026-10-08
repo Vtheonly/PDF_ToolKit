@@ -26,7 +26,7 @@ programmatically by any application through three interchangeable adapters:
 
 ```bash
 pip install -e ".[dev]"     # engine + test tooling
-pytest                      # run the full test suite (646 tests)
+pytest                      # run the full test suite (644 tests)
 ```
 
 ```python
