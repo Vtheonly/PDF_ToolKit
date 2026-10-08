@@ -6,6 +6,46 @@ for end users.
 
 ---
 
+## 2026-10-09 — Session 2 (cont.): issue-1/task-1.3 done (Unified Page Slab)
+
+* **UPS binary layout landed (audit task 1.3):**
+  `native/include/pdftoolkit/memory/page_slab.hpp` +
+  `native/src/memory/page_slab.cpp`. One page = one contiguous
+  BumpArena record: 64-byte header + SoA x/y/w/h + UTF-32 codepoints +
+  sorted term hashes + opaque postings, every section 32-byte aligned
+  (uniform invariant), native-endian "UPS1" format, CRC-32 over the
+  slab with the crc field excluded — the CRC pins the exact byte length.
+* **Audit defect corrected (P-015, same class as P-011/P-012/P-014):**
+  the audit's `PageSlabHeader` (56 B of fields + `reserved[12]` = 68 B,
+  `alignas(64)` → 128) could never satisfy its own
+  `static_assert(sizeof == 64)`. Corrected to `reserved[8]`; every named
+  field kept; `sizeof`/`alignof`/field-offset static_asserts freeze the
+  format.
+* **Acceptance criterion met and test-locked:** glyph counts chosen so
+  raw arrays are NOT multiples of 32 force real padding — every section
+  offset and every absolute coordinate-array address is 32-byte aligned
+  (`coordinate_offsets_are_32_byte_aligned`, 16/16 cases incl. builder
+  and view rejections, tamper detection, CRC reference vector).
+* **`pdtk_bench_slab` landed** (task 0.2's `bench_slab.cpp` slot):
+  coordinate extraction **1.71 × 10⁹ glyphs/s (0.585 ns/glyph, CV
+  0.55 %)** — within ~2× of the environment's bare traversal ceiling,
+  i.e. the layout itself costs almost nothing per glyph; build
+  5.25 × 10⁶ glyphs/s (190 ns/glyph, bitwise-CRC-dominated — table/hw
+  CRC optimization deliberately deferred, no gate covers build).
+  Recording: `docs/benchmarks/2026-10-09-phase1-slab-baseline.md`;
+  the audit's cache-hit-rate rows stay blocked by U-010 (no perf).
+* **Design notes:** slabs allocate through an `alignas(64)` storage-unit
+  adapter instead of extending `BumpArena` (the verified arena component
+  stays untouched; alignment is the slab module's concern — revisit if a
+  second consumer needs general aligned allocations). Postings are
+  opaque bytes until task 4.1 defines the in-page posting format
+  (honest-stub principle).
+* **Verification matrix (all 2026-10-09):** release zero-warning + ctest
+  **8/8**; debug 8/8; asan+ubsan 7/7; tsan 7/7; offline (no FetchContent)
+  8/8; Python 644 passed.
+
+---
+
 ## 2026-10-09 — Session 2 (cont.): issue-1/task-1.1 done (guarded MmapHandle + FFI wiring + bench)
 
 * **Guarded memory-mapped buffer manager landed (audit task 1.1):**

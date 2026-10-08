@@ -34,7 +34,7 @@ issue #1). Pre-issues use the `T-NNN` prefix.
 |----|------|--------|------------------|
 | issue-1/task-1.1 | Guarded memory-mapped buffer manager (`MmapHandle`) | `done` | `native/{include/pdftoolkit/memory/mmap.hpp, src/memory/mmap.cpp}` per audit spec; design ADR-0006 (audit's throw-from-handler is UB — P-014). Verified 2026-10-09: **truncation acceptance met** (`guard_converts_truncation_to_typed_exception`: ftruncate under a live mapping → `PdfToolkitException(IoTruncated)`, never a crash) + 14 further cases incl. three fork-based honesty deaths (no recovery point / foreign mapping / dead handle → default disposition), 128-slot capacity + recycling. Matrix: release zero-warning + ctest **7/7**, debug 7/7, asan+ubsan (no-recover) 6/6, tsan 6/6, offline (no FetchContent) 7/7, Python 644. FFI wiring: `pdftoolkit_register_document` now mmaps via `MmapHandle` + `advise(WillNeed)` (typed errors → C-ABI statuses; directories now correctly `UNREADABLE_PDF`). `pdtk_bench_mmap` landed (component-exists rule): warm traversal 2.55 GB/s mean = **~88–90 % of this environment's heap ceiling** (control experiment; recording `docs/benchmarks/2026-10-09-phase1-mmap-baseline.md`; U-012). Build change: `CMAKE_POSITION_INDEPENDENT_CODE ON` (TLS in a shared object — see ADR-0006). **Live CI green on 5346a2e** (run 37833962102: release+benchmarks, asan, tsan, pytest py3.9/3.12 — 5/5, mmap fork-based honesty tests clean under both sanitizers on the runner). |
 | issue-1/task-1.2 | Thread-local bump-pointer arena allocator | `done` | `BumpArena` per audit spec + hardening (capacity rounding, non-copyable/movable, count-overflow guard); 11/11 unit tests green. **Authoritative measurement recorded** (delivered by task 0.2): 1M allocs + reset = mean 485.48 us, P50 482.15 / P90 496.27 / P99 513.31 us (20 reps, CV 2.4%); steady-state alloc+reset pair = **0.28 ns** (~0.9 cycles @3.2 GHz); ~2.06e9 allocs/s. Evidence: `docs/benchmarks/2026-10-09-phase0-arena-baseline.md`; regression guard < 10 ms in `test_arena.cpp` (Release-only). The audit-text correction (P-011) remains an open action for the audit owner. |
-| issue-1/task-1.3 | Unified Page Slab (UPS) binary layout | `pending` | Depends on 1.1, 1.2. `static_assert(sizeof(PageSlabHeader) == 64)`. |
+| issue-1/task-1.3 | Unified Page Slab (UPS) binary layout | `done` | `native/include/pdftoolkit/memory/page_slab.hpp` + `src/memory/page_slab.cpp`. **Audit's struct corrected (P-015):** `reserved[12]`→`[8]` — the audit's 68-byte layout could never satisfy its own `sizeof == 64` assert (alignas(64) would round to 128); every named field kept. Verified 2026-10-09: **acceptance met** (`coordinate_offsets_are_32_byte_aligned`: glyph counts 0/1/7/33 — raw sizes deliberately not multiples of 32 — every section offset % 32 == 0 and every absolute coordinate-array address % 32 == 0, slab base % 64 == 0). 16/16 cases: roundtrips, zero-copy span identity, empty page, multi-slab coexistence, builder rejections (mismatched arrays / unsorted hashes / exhaustion), view rejections (magic / misaligned offset / OOB / truncation / misaligned base / empty), CRC tamper detection + reference vector. `PageSlabView` gives zero-copy spans for all arrays; postings stay opaque bytes until task 4.1 (honest-stub). `pdtk_bench_slab` landed: **coordinate extraction 1.71e9 glyphs/s (0.585 ns/glyph, CV 0.55%)**, build 5.25e6 glyphs/s (190 ns/glyph, CRC-dominated — optimization deferred, no gate). Recording: `docs/benchmarks/2026-10-09-phase1-slab-baseline.md`; cache-hit-rate rows blocked by U-010. Matrix: release 8/8 zero-warning, debug 8/8, asan 7/7, tsan 7/7, offline 8/8, Python 644. |
 
 ### Phase 2 — PDF binary protocol, object graph, SIMD decompression
 
@@ -95,24 +95,26 @@ issue #1). Pre-issues use the `T-NNN` prefix.
 
 ## Next tasks (recommended order)
 
-1. **issue-1/task-1.3** — Unified Page Slab layout (`static_assert` header +
-   `PageSlabView` span accessors) + `pdtk_bench_slab`. Dependencies
-   (1.1, 1.2) are now both done.
-2. **issue-1/task-2.1** — zero-copy backward `startxref`/trailer scanner
-   (depends only on 1.1, now unblocked) — or task-1.3 first if staying
-   strictly inside Phase 1.
-3. **MSan-with-clang CI job** (U-002 remainder) — pursue when Phase 1+
+1. **issue-1/task-2.1** — zero-copy backward `startxref`/trailer scanner
+   (depends only on 1.1, unblocked; Phase 2 entry point).
+2. **issue-1/task-2.3** — zero-copy lexer (depends on 1.1; throughput gate
+   2.5 GB/s must be reported against the environment ceiling per U-012).
+3. **MSan-with-clang CI job** (U-002 remainder) — pursue when Phase 2
    code justifies the instrumented-libc++ setup cost.
-4. **P-011/P-012/P-014 follow-ups** — audit owner corrects the
-   mis-scaled task-1.2 bound, the task-0.2 dependency inversion and the
-   task-1.1 throw-from-handler wording in `docs/issues.md` / issue #1.
+4. **P-011/P-012/P-014/P-015 follow-ups** — audit owner corrects the
+   mis-scaled task-1.2 bound, the task-0.2 dependency inversion, the
+   task-1.1 throw-from-handler wording and the task-1.3 `reserved`
+   padding in `docs/issues.md` / issue #1.
 5. **P-012 follow-up** — when landing bench_wand (task 4.2), satisfy the
    audit's original task-0.2 acceptance literally.
+6. **Slab CRC optimization** (deferred; see the phase-1 slab baseline's
+   method note) — table-driven or hardware CRC32 if Phase 2/3 ingestion
+   makes slab construction hot.
 
 ## Session log
 
 | Date | Session | Tasks progressed |
 |------|---------|------------------|
-| 2026-10-09 | Session 2 (0.2 + 1.2 + 1.1) | Baseline re-verified green (Python 644, native 6/6). issue-1/task-0.2 done (pipeline + pdtk_bench_arena + run_perf.sh + CI step; ADR-0005; P-012; U-006 resolved; U-009/U-010 filed; CI green incl. benchmark step, run 37826782644 on 9fb0bbc). issue-1/task-1.2 closed with the authoritative measurement. **issue-1/task-1.1 done**: guarded `MmapHandle` + FFI mmap wiring + `pdtk_bench_mmap` (ADR-0006; P-013 false alarm withdrawn with methodology rule; P-014 filed; U-011/U-012 filed; ADR index gained the missing 0005 row). Verification matrix: release 7/7 zero-warning, debug 7/7, asan 6/6, tsan 6/6, offline 7/7, Python 644. |
+| 2026-10-09 | Session 2 (0.2 + 1.2 + 1.1 + 1.3) | Baseline re-verified green (Python 644, native 6/6). issue-1/task-0.2 done (pipeline + pdtk_bench_arena + run_perf.sh + CI step; ADR-0005; P-012; U-006 resolved; U-009/U-010 filed; CI green incl. benchmark step, run 37826782644 on 9fb0bbc). issue-1/task-1.2 closed with the authoritative measurement. **issue-1/task-1.1 done**: guarded `MmapHandle` + FFI mmap wiring + `pdtk_bench_mmap` (ADR-0006; P-013 false alarm withdrawn with methodology rule; P-014 filed; U-011/U-012 filed; ADR index gained the missing 0005 row; CI green on 5346a2e run 37833962102). **issue-1/task-1.3 done**: UPS layout + zero-copy PageSlabView + `pdtk_bench_slab` (P-015 audit-defect correction; extraction 0.585 ns/glyph). Verification matrix grew to release 8/8 zero-warning, debug 8/8, asan 7/7, tsan 7/7, offline 8/8, Python 644. |
 | 2026-10-09 | Session 2 (0.2 + 1.2 closure) | Baseline re-verified green (Python 644, native 6/6). issue-1/task-0.2 done (pipeline + pdtk_bench_arena + run_perf.sh + CI step; ADR-0005; P-012; U-006 resolved; U-009/U-010 filed). issue-1/task-1.2 closed with the authoritative measurement. Verification matrix: offline 6/6, asan 5/5, tsan 5/5, debug 6/6, Python 644, YAML/JSON valid. |
 | 2026-10-09 | Session 1 (issue-#1 kickoff) | T-000 verified N/A; T-001..T-004 done; baseline 644/644 green established; issue-1/task-0.1 done; issue-1/task-0.3 done (CI first run pending); issue-1/task-1.2 in progress (arena + 11 tests; benchmark pending 0.2); discoveries P-006..P-011, U-001..U-008 filed; ADR-0001..0004 recorded. |

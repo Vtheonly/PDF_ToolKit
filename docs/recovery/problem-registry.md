@@ -247,3 +247,25 @@ history — do not delete them.
   not *from the handler*).
 * **Status:** `open` (audit text amendment outstanding; code side done,
   verified under ASan+UBSan and TSan).
+
+## P-015 — Audit task-1.3's PageSlabHeader cannot satisfy its own static_assert (audit defect)
+
+* **Where:** `docs/issues.md` (issue #1), Task 1.3 step 1: the specified
+  `PageSlabHeader` has fourteen 4-byte fields (56 bytes) **plus
+  `uint8_t reserved[12]`** = **68 bytes**, while the same snippet demands
+  `static_assert(sizeof(PageSlabHeader) == 64)`.
+* **What:** 68 > 64 — and with `alignas(64)` the compiler must round the
+  struct up to **128** bytes, so the audit's own assertion can never
+  pass. Same audit-defect class as P-011/P-012/P-014: the intent (one
+  cache line) is right, the literal arithmetic is wrong.
+* **Resolution implemented (2026-10-09):** `reserved[8]` instead of
+  `reserved[12]` — 56 + 8 = 64 exactly; every named field is kept, in
+  the audit's order, with the audit's names. Frozen with
+  `static_assert`s on `sizeof`, `alignof` and the field offsets
+  (`native/include/pdftoolkit/memory/page_slab.hpp`). The deviation is
+  documented at the `reserved` field itself.
+* **Action for the audit owner:** amend task 1.3's snippet in
+  `docs/issues.md` / issue #1 (`reserved[8]`).
+* **Status:** `open` (audit text amendment outstanding; code side done
+  and test-locked — including the acceptance criterion that coordinate
+  offsets are 32-byte aligned).

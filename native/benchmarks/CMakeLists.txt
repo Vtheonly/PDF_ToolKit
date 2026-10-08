@@ -8,7 +8,7 @@
 #
 #   task 1.2 (BumpArena)      -> pdtk_bench_arena   (landed with task 0.2)
 #   task 1.1 (MmapHandle)     -> pdtk_bench_mmap    (lands with task 1.1)
-#   task 1.3 (PageSlab)       -> pdtk_bench_slab    (lands with task 1.3)
+#   task 1.3 (PageSlab)       -> pdtk_bench_slab    (landed with task 1.3)
 #   task 2.3 (ZeroCopyLexer)  -> pdtk_bench_lexer   (lands with task 2.3)
 #   task 4.2 (BlockMaxWand)   -> pdtk_bench_wand    (lands with task 4.2)
 
@@ -30,4 +30,12 @@ target_link_libraries(pdtk_bench_mmap
   PRIVATE pdftoolkit_core benchmark::benchmark pdtk_warnings)
 if(TARGET pdtk_native_arch)
   target_link_libraries(pdtk_bench_mmap PRIVATE pdtk_native_arch)
+endif()
+
+# task 1.3 (PageSlab) -> pdtk_bench_slab (component-exists rule above)
+add_executable(pdtk_bench_slab bench_slab.cpp)
+target_link_libraries(pdtk_bench_slab
+  PRIVATE pdftoolkit_core benchmark::benchmark pdtk_warnings)
+if(TARGET pdtk_native_arch)
+  target_link_libraries(pdtk_bench_slab PRIVATE pdtk_native_arch)
 endif()
