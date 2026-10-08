@@ -122,3 +122,36 @@ entry resolved with a pointer.
   only, so it has never been compiled here.
 * **How to resolve:** first Windows CI run (task 0.3's matrix); the
   pure-C smoke test and arena tests must pass there unchanged.
+
+## U-011 — Windows SEH translation of EXCEPTION_IN_PAGE_ERROR is compile-only
+
+* **Question:** Does the Win32 `MmapHandle` path
+  (CreateFileA + CreateFileMappingA + MapViewOfFile) behave correctly,
+  and can `guarded()` ever protect accesses on Windows?
+* **Assumption (current):** the mapping path compiles and works (it is
+  the canonical Win32 idiom, mirroring U-008's MSVC precedent), but
+  `guarded()` runs its body unguarded: SIGBUS recovery is POSIX-only and
+  the Win32 analogue — an SEH `__except` filter translating
+  `EXCEPTION_IN_PAGE_ERROR` — is deferred. `advise()` returns false on
+  Windows (PrefetchVirtualMemory is the candidate wiring).
+* **How to resolve:** first Windows CI run compiles and exercises the
+  mapping; SEH translation is a deliberate follow-up decision (needs an
+  ADR of its own — mixing SEH and C++ exceptions has its own rules).
+
+## U-012 — Absolute throughput gates exceed the reference environment's ceiling
+
+* **Question:** Can the audit's later throughput acceptance gates be
+  validated in this environment at all — task 2.3 lexer "> 2.5 GB/s",
+  task 4.3 SIMD scanner "> 4.0 GB/s"?
+* **Assumption (current):** no. The task-1.1 baseline's control
+  experiment measured a **~2.9 GB/s ceiling for any 128 MiB traversal in
+  this sandbox** — even a plain anonymous heap buffer with a
+  vectorized (AVX-512) byte-sum (2.40–2.85 GB/s; warm mmap 88–90 % of
+  that; recording: `docs/benchmarks/2026-10-09-phase1-mmap-baseline.md`).
+  The sandbox is a shared-vCPU kata container; the gates were surely
+  drafted against real hardware.
+* **How to resolve:** when the gated tasks land, report the ratio
+  "component throughput / environment traversal ceiling" alongside the
+  absolute number, and mark gate pass/fail as environment-bound unless a
+  self-hosted runner is available. The durable cross-environment metric
+  for task 1.1 is already recorded (mmap retains ~88–90 % of heap speed).

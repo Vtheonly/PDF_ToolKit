@@ -11,21 +11,35 @@
 
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <new>
 #include <string>
 #include <unordered_map>
 
 #include "pdftoolkit/errors.hpp"
+#include "pdftoolkit/memory/mmap.hpp"
 #include "pdftoolkit/version.hpp"
 
 namespace {
 
 using pdftoolkit::ErrorCode;
+using pdftoolkit::memory::Advice;
+using pdftoolkit::memory::MmapHandle;
+
+// One registered document: a stable id plus the zero-copy mapping that
+// arrived with audit task 1.1. shared_ptr per the audit's Phase-1
+// architecture diagram — later phases (parser, slab) share this mapping
+// rather than re-reading the file.
+struct DocEntry {
+    uint32_t id;
+    std::shared_ptr<MmapHandle> mapping;
+};
 
 struct EngineState {
-    // Scaffolding registry: path -> stable id. The lock-free atomic
-    // registry (audit task 6.1) replaces this when it lands.
-    std::unordered_map<std::string, uint32_t> doc_ids;
+    // Scaffolding registry: path -> stable id + live mapping. The
+    // lock-free atomic registry (audit task 6.1) replaces this when it
+    // lands.
+    std::unordered_map<std::string, DocEntry> docs;
     uint32_t next_doc_id = 1;
 };
 
@@ -90,18 +104,34 @@ int32_t pdftoolkit_register_document(EngineHandle* handle,
             return to_status(ErrorCode::InvalidArgument);
         }
         const std::filesystem::path fs_path(path);
-        std::error_code ec;
-        if (!std::filesystem::exists(fs_path, ec)) {
-            return to_status(ErrorCode::DocumentNotFound);
+
+        // Stable ids AND a stable mapping: re-registering a path returns
+        // the id of the first registration and keeps the first mapping
+        // (documents are treated as immutable corpus files; the file is
+        // only re-mapped if this engine handle never saw the path).
+        const auto existing = handle->state.docs.find(fs_path.string());
+        if (existing != handle->state.docs.end()) {
+            *out_doc_id = existing->second.id;
+            return PDTK_OK;
         }
-        // Stable ids: registering the same path twice yields the same id.
-        const auto [entry, inserted] =
-            handle->state.doc_ids.try_emplace(fs_path.string(), handle->state.next_doc_id);
-        if (inserted) {
-            ++handle->state.next_doc_id;
-        }
-        *out_doc_id = entry->second;
+
+        // Audit task 1.1 wiring: registration maps the file zero-copy
+        // (MmapHandle) instead of merely checking existence. Constructor
+        // failures map to the C-ABI status codes (DocumentNotFound,
+        // UnreadablePdf, Internal) via the typed exception.
+        auto mapping = std::make_shared<MmapHandle>(path);
+        // Sequential corpus ingestion (audit task 1.1 step 3): ask the
+        // kernel for read-ahead. Advisory only — a refusal is not an
+        // error.
+        (void)mapping->advise(Advice::WillNeed);
+
+        const uint32_t id = handle->state.next_doc_id++;
+        handle->state.docs.emplace(fs_path.string(),
+                                   DocEntry{id, std::move(mapping)});
+        *out_doc_id = id;
         return PDTK_OK;
+    } catch (const pdftoolkit::PdfToolkitException& e) {
+        return to_status(e.code());
     } catch (...) {
         return to_status(ErrorCode::Internal);
     }

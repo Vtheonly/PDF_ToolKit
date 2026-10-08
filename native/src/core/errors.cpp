@@ -1,6 +1,14 @@
 #include "pdftoolkit/errors.hpp"
 
+#include <string>
+
 namespace pdftoolkit {
+
+PdfToolkitException::PdfToolkitException(ErrorCode code, const char* detail)
+    : std::runtime_error(detail == nullptr
+                              ? std::string(error_message(code))
+                              : std::string(error_message(code)) + ": " + detail),
+      code_(code) {}
 
 const char* error_message(ErrorCode code) noexcept {
     switch (code) {

@@ -23,3 +23,11 @@ target_link_libraries(pdtk_bench_arena
 if(TARGET pdtk_native_arch)
   target_link_libraries(pdtk_bench_arena PRIVATE pdtk_native_arch)
 endif()
+
+# task 1.1 (MmapHandle) -> pdtk_bench_mmap (component-exists rule above)
+add_executable(pdtk_bench_mmap bench_mmap.cpp)
+target_link_libraries(pdtk_bench_mmap
+  PRIVATE pdftoolkit_core benchmark::benchmark pdtk_warnings)
+if(TARGET pdtk_native_arch)
+  target_link_libraries(pdtk_bench_mmap PRIVATE pdtk_native_arch)
+endif()

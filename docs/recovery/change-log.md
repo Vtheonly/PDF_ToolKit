@@ -6,6 +6,70 @@ for end users.
 
 ---
 
+## 2026-10-09 — Session 2 (cont.): issue-1/task-1.1 done (guarded MmapHandle + FFI wiring + bench)
+
+* **Guarded memory-mapped buffer manager landed (audit task 1.1):**
+  `native/include/pdftoolkit/memory/mmap.hpp` +
+  `native/src/memory/mmap.cpp`. POSIX `mmap(PROT_READ, MAP_PRIVATE)` +
+  `posix_madvise` (WILLNEED/RANDOM), Win32 `CreateFileA`→`MapViewOfFile`
+  compile-only path, immutable-span-only exposure, rule-of-five, typed
+  constructor error mapping (InvalidArgument/DocumentNotFound/
+  UnreadablePdf/Internal), 128-slot guard registry. **Acceptance
+  criterion met and test-locked**: truncation under a live mapping →
+  `PdfToolkitException(IoTruncated)` through `guarded()`, never a crash
+  (`native/tests/test_mmap.cpp`, 15 cases incl. three fork-based honesty
+  deaths and capacity/recycling).
+* **Design deviation from the audit text (P-014, ADR-0006):** the audit
+  prescribes *throwing from the sigaction handler* — undefined
+  behaviour. Implemented compliantly instead: `sigsetjmp`/`siglongjmp`
+  recovery point published per-thread; the handler converts only faults
+  inside registered live mappings under an active recovery point;
+  everything else is re-raised with the previously-installed disposition
+  (sanitizer handlers chain through). Per-slot seqlock registry keeps
+  the probe async-signal-safe, allocation-free and lock-free.
+* **FFI wiring (the C-ABI's promised "arrives with task 1.1"):**
+  `pdftoolkit_register_document` now mmaps the file via `MmapHandle` +
+  `advise(WillNeed)` (sequential ingestion hint), keeping stable ids and
+  the first mapping on re-registration. Directories are now correctly
+  rejected as `PDTK_ERR_UNREADABLE_PDF` (previously accepted by the
+  existence check); typed exceptions translate to C-ABI statuses.
+  `pdftoolkit.h` scaffolding notes updated.
+* **Build-system discovery (would break any TLS-using core code):**
+  linking a non-PIC static core into the shared FFI library fails on
+  TLS relocations (`R_X86_64_TPOFF32`). Fixed with
+  `CMAKE_POSITION_INDEPENDENT_CODE ON` for the native tree.
+* **`pdtk_bench_mmap` landed** (audit task 0.2's `bench_mmap.cpp` slot,
+  component-exists rule): warm 128 MiB traversal mean 2.55 GB/s
+  (P50 51.37 ms / P90 65.14 ms / P99 65.88 ms, CV 14.9 %);
+  map+first-touch 1.94 GB/s (CV 4.2 %); open→advise→close lifecycle
+  4.59 µs. Recording: `docs/benchmarks/2026-10-09-phase1-mmap-baseline.md`.
+* **Environment-ceiling discovery (U-012):** a control experiment showed
+  this sandbox traverses *any* 128 MiB buffer (heap, AVX-512-vectorized
+  byte-sum) at only 2.40–2.85 GB/s — the durable cross-environment
+  statement is "warm mmap retains ~88–90 % of heap traversal speed".
+  The audit's future gates (lexer 2.5 GB/s, scanner 4.0 GB/s) sit at or
+  above this environment's raw ceiling and must be reported as
+  ratios when those tasks land.
+* **CI false alarm (P-013, withdrawn):** the workflow's
+  `branches: [main]` filter *displayed* as `branches: ain]` — the output
+  rendering layer consumed `[m` as an ANSI escape. Diagnosed as a typo,
+  then disproven byte-level (`od -c`) before commit: the file was always
+  correct and CI triggered on every push as configured. Recorded as a
+  verification-methodology pitfall (byte-dump before believing
+  "corrupted output"). Also: first CI verification of the benchmark
+  step came back green (run 37826782644 on 9fb0bbc, 5/5 jobs), closing
+  task-0.2's "pending live CI run" note.
+* **Docs hygiene:** ADR-0005 was missing from `docs/decisions/README.md`
+  index — added, together with ADR-0006. U-011 (Windows SEH
+  compile-only) and U-012 filed; native-tree.md updated to the new
+  7-ctest reality.
+* **Verification matrix (all 2026-10-09):** release zero-warning + ctest
+  7/7; debug 7/7; asan+ubsan `-fno-sanitize-recover=all` 6/6; tsan 6/6;
+  offline `-DPDTK_ENABLE_BENCHMARKS=OFF` 7/7 (no `_deps`); Python 644
+  passed.
+
+---
+
 ## 2026-10-09 — Session 2: issue-1/task-0.2 done (benchmark pipeline); task-1.2 closed
 
 * **Benchmarking pipeline landed (audit task 0.2):** `PDTK_ENABLE_BENCHMARKS`

@@ -22,6 +22,13 @@ option(PDTK_WERROR              "Treat compiler warnings as errors (zero-warning
 option(PDTK_ENABLE_NATIVE_ARCH  "Compile optimized builds with -march=native (see ADR/U-003)" ON)
 option(PDTK_BUILD_TESTS         "Build the native test suite" ON)
 
+# pdftoolkit_core is consumed by the shared FFI library (and the Python
+# module); it must therefore be position-independent. This became
+# mandatory with task 1.1: the SIGBUS guard's thread-local recovery
+# pointer needs a TLS relocation model that is legal inside a shared
+# object (initial-exec/local-exec in a non-PIC archive does not link).
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 include(cmake/CompilerWarnings.cmake)
 
 if(PDTK_ENABLE_NATIVE_ARCH AND NOT MSVC)
@@ -40,6 +47,7 @@ add_library(pdftoolkit_core STATIC
   src/core/version.cpp
   src/core/errors.cpp
   src/memory/arena.cpp
+  src/memory/mmap.cpp
 )
 target_include_directories(pdftoolkit_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -108,6 +116,9 @@ if(PDTK_BUILD_TESTS)
   add_executable(pdtk_test_errors tests/test_errors.cpp)
   target_link_libraries(pdtk_test_errors PRIVATE pdftoolkit_core pdtk_warnings)
 
+  add_executable(pdtk_test_mmap tests/test_mmap.cpp)
+  target_link_libraries(pdtk_test_mmap PRIVATE pdftoolkit_core pdtk_warnings)
+
   add_executable(pdtk_test_ffi tests/test_ffi.cpp)
   target_link_libraries(pdtk_test_ffi PRIVATE pdftoolkit_ffi pdtk_warnings)
 
@@ -118,6 +129,7 @@ if(PDTK_BUILD_TESTS)
 
   add_test(NAME arena        COMMAND pdtk_test_arena)
   add_test(NAME errors       COMMAND pdtk_test_errors)
+  add_test(NAME mmap         COMMAND pdtk_test_mmap)
   add_test(NAME ffi          COMMAND pdtk_test_ffi)
   add_test(NAME c_abi_smoke  COMMAND pdtk_c_abi_smoke)
   add_test(NAME cli_version  COMMAND pdftoolkit_cli --version)

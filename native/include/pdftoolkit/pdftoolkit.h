@@ -16,10 +16,10 @@
  *
  * Phase-0 scaffolding status (honest stubs — see docs/recovery/):
  *   - engine create/destroy and version are fully implemented;
- *   - pdftoolkit_register_document validates arguments and file
- *     existence and assigns stable ids, but does NOT yet parse or mmap
- *     the document (arrives with task 1.1) — any existing file is
- *     accepted at this stage;
+ *   - pdftoolkit_register_document validates arguments, maps the file
+ *     zero-copy through the guarded MmapHandle (audit task 1.1) and
+ *     assigns stable ids; it does NOT yet parse the document (Phase 2)
+ *     — any regular readable file is accepted at this stage;
  *   - pdftoolkit_search_wand returns PDTK_ERR_NOT_IMPLEMENTED (the WAND
  *     engine arrives with task 4.2).
  */
@@ -97,8 +97,9 @@ PDTK_API int32_t pdftoolkit_engine_destroy(EngineHandle* handle) PDTK_NOEXCEPT;
 PDTK_API int32_t pdftoolkit_version(char* out_buf, uint32_t buf_len) PDTK_NOEXCEPT;
 
 /* Register a document with the engine, assigning it a stable id.
- * Scaffolding note: validates argument and file existence only —
- * actual mmap/parse arrives with audit task 1.1. */
+ * Maps the file zero-copy (guarded MmapHandle, audit task 1.1); the
+ * document is NOT parsed yet (Phase 2). Re-registering a path returns
+ * its existing id and keeps the first mapping. */
 PDTK_API int32_t pdftoolkit_register_document(EngineHandle* handle,
                                               const char* path,
                                               uint32_t* out_doc_id) PDTK_NOEXCEPT;

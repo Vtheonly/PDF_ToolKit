@@ -1,6 +1,6 @@
 # Native Engine — Target Tree & Coexistence Model (issue #1)
 
-Status: **Phase 0 scaffolding landed (task 0.1 + 0.2 done, task 1.2 done)**.
+Status: **Phase 0 scaffolding landed (tasks 0.1, 0.2, 0.3, 1.1, 1.2 done)**.
 The Python engine remains the authoritative implementation until the
 native core reaches parity and the audit's performance gates pass
 (AGENTS.md §5.6).
@@ -9,24 +9,34 @@ native core reaches parity and the audit's performance gates pass
 
 ```
 native/
-├── CMakeLists.txt              real build logic: 4 targets + 6 ctests + benchmarks
-│                               (PDTK_ENABLE_BENCHMARKS, default ON — ADR-0005)
+├── CMakeLists.txt              real build logic: 4 targets + 7 ctests + benchmarks
+│                               (PDTK_ENABLE_BENCHMARKS, default ON — ADR-0005;
+│                               POSITION_INDEPENDENT_CODE ON — TLS in the .so, ADR-0006)
 ├── cmake/CompilerWarnings.cmake  zero-warning profile (-Werror)
 ├── include/pdftoolkit/
 │   ├── pdftoolkit.h            C-ABI: 6 PDTK_API functions, panic-proof
-│   ├── errors.hpp              ErrorCode enum mirrored from C codes
+│   ├── errors.hpp              ErrorCode enum + PdfToolkitException (typed core
+│   │                           exceptions; never crosses extern "C")
 │   ├── version.hpp             native_version() -> "0.1.0"
-│   └── memory/arena.hpp        BumpArena (task 1.2 done, measured via task 0.2)
+│   └── memory/
+│       ├── arena.hpp           BumpArena (task 1.2 done, measured via task 0.2)
+│       └── mmap.hpp            MmapHandle (task 1.1 done — guarded SIGBUS design,
+│                               ADR-0006; immutable spans; madvise hints)
 ├── src/
 │   ├── core/{version,errors}.cpp
-│   ├── memory/arena.cpp        cross-platform aligned alloc
-│   ├── ffi/pdftoolkit.cpp      EngineHandle + C-ABI implementations
+│   ├── memory/
+│   │   ├── arena.cpp           cross-platform aligned alloc
+│   │   └── mmap.cpp            POSIX mmap + per-slot-seqlock guard registry +
+│   │                           Win32 compile-only path (U-011)
+│   ├── ffi/pdftoolkit.cpp      EngineHandle + C-ABI implementations;
+│   │                           register_document mmaps via MmapHandle (task 1.1)
 │   ├── python/pdftoolkit_native.cpp  raw C-API extension module
 │   └── cli/main.cpp            --version; subcommands arrive with 7.3
 ├── benchmarks/                 pdtk_bench_* (audit task 0.2, ADR-0005; a bench
-│   └── bench_arena.cpp           exists only when its component does — map
-│                               at the top of benchmarks/CMakeLists.txt)
+│   ├── bench_arena.cpp           exists only when its component does — map
+│   └── bench_mmap.cpp            at the top of benchmarks/CMakeLists.txt)
 └── tests/                      minimal harness (ADR-0003; migration deferred, U-009)
+    └── test_mmap.cpp           15 cases: truncation acceptance + honesty contract
 ```
 
 Sibling directories from the same audit task (not native code, so they
@@ -37,9 +47,12 @@ scripts/run_perf.sh            benchmark runner + perf stat stage (see U-010)
 docs/benchmarks/                recorded results — the only citable perf numbers
 ```
 
-Verified: zero-warning build (GCC 14.2, C++20), ctest 6/6, `nm -D` shows
-exactly the 6 C symbols exported from the FFI library, extension imports
-from Python, CLI runs.
+Verified: zero-warning build (GCC 14.2, C++20), ctest 7/7 (release;
+asan/tsan run 6/6 — python_import_smoke excluded there by design),
+`nm -D` shows exactly the 6 C symbols exported from the FFI library,
+extension imports from Python, CLI runs. Guarded-mmap acceptance:
+truncation under a live mapping throws `PdfToolkitException(IoTruncated)`
+instead of crashing (ADR-0006, test-locked).
 
 ## Isolation model (ADR-0002)
 

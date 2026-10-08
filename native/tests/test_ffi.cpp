@@ -100,6 +100,46 @@ PDTK_TEST(register_document_assigns_stable_ids) {
     PDTK_ASSERT_EQ(pdftoolkit_engine_destroy(engine), PDTK_OK);
 }
 
+// Task 1.1 wiring: registration maps the file. A zero-byte file is a
+// VALID (empty) mapping; a directory is not a regular file and must be
+// rejected as unreadable (previously existence-check accepted it).
+class EmptyFile {
+public:
+    explicit EmptyFile(const char* name)
+        : path_(std::filesystem::temp_directory_path() / name) {
+        std::ofstream out(path_, std::ios::binary);
+    }
+    ~EmptyFile() { std::error_code ec; std::filesystem::remove(path_, ec); }
+    const std::filesystem::path& path() const { return path_; }
+
+private:
+    std::filesystem::path path_;
+};
+
+PDTK_TEST(register_document_maps_regular_files_of_any_size) {
+    EmptyFile empty("pdtk_ffi_test_empty.tmp");
+    EngineHandle* engine = nullptr;
+    PDTK_ASSERT_EQ(pdftoolkit_engine_create(&engine), PDTK_OK);
+    uint32_t doc_id = 0;
+    PDTK_ASSERT_EQ(
+        pdftoolkit_register_document(engine, empty.path().string().c_str(), &doc_id),
+        PDTK_OK);
+    PDTK_ASSERT(doc_id != 0);
+    // The mapping must be released cleanly by engine_destroy (leak-checked
+    // under the ASan CI job).
+    PDTK_ASSERT_EQ(pdftoolkit_engine_destroy(engine), PDTK_OK);
+}
+
+PDTK_TEST(register_document_rejects_directories) {
+    EngineHandle* engine = nullptr;
+    PDTK_ASSERT_EQ(pdftoolkit_engine_create(&engine), PDTK_OK);
+    uint32_t doc_id = 0;
+    PDTK_ASSERT_EQ(
+        pdftoolkit_register_document(engine, ".", &doc_id),
+        PDTK_ERR_UNREADABLE_PDF);
+    PDTK_ASSERT_EQ(pdftoolkit_engine_destroy(engine), PDTK_OK);
+}
+
 PDTK_TEST(search_wand_is_an_honest_stub) {
     EngineHandle* engine = nullptr;
     PDTK_ASSERT_EQ(pdftoolkit_engine_create(&engine), PDTK_OK);

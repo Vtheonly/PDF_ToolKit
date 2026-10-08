@@ -20,3 +20,5 @@ Rules:
 | [0002](adr-0002-native-tree-isolation.md) | Isolate all C++20 native code under `native/` | accepted |
 | [0003](adr-0003-phase0-offline-build-minimal-deps.md) | Phase 0 builds offline with zero external C++ dependencies | accepted |
 | [0004](adr-0004-python-keyword-scan-optimization-rejected.md) | Reject Python-level combined-keyword scan optimization | accepted |
+| [0005](adr-0005-benchmark-pipeline-policy.md) | Benchmark pipeline policy (FetchContent pin, single-invocation rule, recording ledger) | accepted |
+| [0006](adr-0006-guarded-mmap-sigbus-design.md) | Guarded SIGBUS recovery for MmapHandle (sigsetjmp/siglongjmp, not throw-from-handler) | accepted |

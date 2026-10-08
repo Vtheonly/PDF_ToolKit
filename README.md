@@ -128,8 +128,9 @@ A C++20 native core is being built under `native/` per
 [issue #1](https://github.com/Vtheonly/PDF_ToolKit/issues/1) — the
 re-architecture from Python wrapper to high-throughput systems engine.
 The Python engine above remains the authoritative implementation until
-the native core reaches parity. Current state: Phase 0 complete + the
-memory-arena task (1.2) measured.
+the native core reaches parity. Current state: Phase 0 complete; memory
+subsystem tasks 1.1 (guarded `MmapHandle`, ADR-0006) and 1.2 (`BumpArena`)
+done and measured.
 
 ```bash
 cmake --preset release -DPython3_EXECUTABLE=$(which python)  # needs cmake+ninja

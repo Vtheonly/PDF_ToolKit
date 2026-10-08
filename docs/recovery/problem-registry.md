@@ -197,3 +197,53 @@ history — do not delete them.
   `docs/issues.md` / issue #1.
 * **Status:** `open` (audit text amendment outstanding — the only remaining
   action; the code side is done, measured and guarded).
+
+## P-013 — CI branch filter *appeared* corrupted — terminal rendering artifact (withdrawn; verification pitfall)
+
+* **Where:** `.github/workflows/ci.yml`, `on: push: branches:` — and,
+  more importantly, **any future byte-level verification done through
+  terminal output**.
+* **What happened:** the filter `branches: [main]` was repeatedly
+  *displayed* as `branches: ain]` by the tool-output rendering layer,
+  which consumed `[m` as if it were an ANSI escape sequence (`ESC[m` =
+  reset). A grep for `ain]` even "matched" — because `ain]` is a
+  substring of `[main]`. This briefly led to a false "CI trigger typo"
+  diagnosis (P-013 as originally drafted) during session 2, including a
+  claimed "fix" that had nothing to change: the file was byte-exact
+  `    branches: [main]\n` all along (`od -c` proof), and CI had
+  triggered on every push to main (3/3 runs green) exactly as configured.
+* **Why it is still recorded:** the pitfall is real and will recur.
+  Square-bracketed YAML values (`[main]`, `[a, b]`) and ANSI-adjacent
+  sequences in tool output can silently alter *what the agent sees*,
+  producing confident false positives. This cost real investigation
+  time once; the entry prevents a repeat.
+* **Rule going forward:** any "corrupted bytes" conclusion drawn from
+  rendered output must be confirmed with a byte-level dump (`od -c` /
+  `git diff`) before it is written to a registry — and grep patterns
+  must not be substrings that can match through the artifact.
+* **Status:** `withdrawn` (no defect ever existed; recorded as a
+  verification-methodology pitfall).
+
+## P-014 — Audit task-1.1 step 4 prescribes throwing from a signal handler — undefined behaviour (audit defect)
+
+* **Where:** `docs/issues.md` (issue #1), Task 1.1 step 4: "Register a
+  thread-safe `sigaction` handler for `SIGBUS` ... and **throw**
+  `PdfToolkitException(ErrorCode::IoTruncated)`."
+* **What:** throwing a C++ exception from inside a signal handler is
+  undefined behaviour (the unwinder can run on the signal stack
+  mid-interruption; POSIX provides no exception-safe path out of
+  `sigaction`). Same audit-defect class as P-011/P-012: the *intent* is
+  sound and implementable, the literal prescription is not.
+* **Resolution implemented (2026-10-09):** the typed exception is thrown
+  from the normal stack — `guarded()` establishes a `sigsetjmp` recovery
+  point; the handler validates the fault against a live registered
+  mapping and `siglongjmp()`s back; `guarded()` throws
+  `PdfToolkitException(IoTruncated)`. Full design, honesty contract and
+  alternatives: **ADR-0006**. The audit's acceptance criterion
+  (truncation access → controlled exception, never a crash) is met and
+  test-locked (`native/tests/test_mmap.cpp`).
+* **Action for the audit owner:** amend task 1.1 step 4 wording in
+  `docs/issues.md` / issue #1 (throw *via the guard's recovery path*,
+  not *from the handler*).
+* **Status:** `open` (audit text amendment outstanding; code side done,
+  verified under ASan+UBSan and TSan).
