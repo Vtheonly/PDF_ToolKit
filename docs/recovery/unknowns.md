@@ -62,10 +62,45 @@ entry resolved with a pointer.
 * **Question:** Is configure-time network access acceptable for CI and
   developer machines (FetchContent downloads), or must the repo vendor
   dependencies?
-* **Assumption (current):** acceptable in CI (GitHub runners have network)
-  and for developers; local offline builds stay possible with benchmarks
-  disabled via a CMake option (ADR-0003).
-* **How to resolve:** when implementing issue-1/task-0.2.
+* **Status:** `resolved` (2026-10-09, task 0.2) — policy ADR-0005:
+  `PDTK_ENABLE_BENCHMARKS` option, default ON (CI and developer machines
+  have network); offline machines configure with OFF, which skips the
+  FetchContent entirely (verified: no `_deps` produced, full suite green).
+  Sanitizer presets keep benchmarks OFF. GoogleTest remains unfetched —
+  see U-009.
+
+## U-009 — When does the native test harness migrate to GoogleTest?
+
+* **Question:** ADR-0003 predicted the in-repo assert harness
+  (`native/tests/test_harness.hpp`) would be replaced by GoogleTest when
+  task 0.2 landed. Task 0.2 shipped the *benchmark* pipeline only (scope:
+  the audit's task-0.2 text is about benchmarking; ADR-0005 records the
+  correction). When is GoogleTest actually warranted?
+* **Assumption (current):** at the first test need the harness cannot
+  express — expected triggers: Phase 2 parser corpora (value-parameterized
+  tests over malformed-PDF corpora) or expected-error-path tests
+  (task 5.1 `std::expected`). Until then the harness stays minimal
+  (ADR-0003: do not grow it).
+* **How to resolve:** at the first such test, fetch GoogleTest behind the
+  same `PDTK_ENABLE_BENCHMARKS`-style option pattern (ADR-0005), migrate
+  the existing tests, and delete the harness in that same commit.
+
+## U-010 — `perf stat` unavailable: L1-miss/IPC scorecard rows need bare metal
+
+* **Question:** The audit's scorecard requires `L1-dcache-load-misses`,
+  `instructions`, `cycles` (rows: L1 data cache miss rate, IPC). `perf` is
+  not installed in the reference environment (verified 2026-10-09:
+  `command -v perf` → nothing) and hosted CI runners typically block
+  user-space profiling via `kernel.perf_event_paranoid` (expected on
+  ubuntu-latest; confirm from the first CI run's log).
+* **Assumption (current):** latency benchmarking must not depend on PMU
+  access. `scripts/run_perf.sh` probes perf functionally
+  (`perf stat -e instructions -- true`) and degrades to a printed
+  `SKIPPED (<reason>)` with exit 0 — verified live for the
+  not-installed case.
+* **How to resolve:** when a self-hosted/privileged runner exists, re-run
+  the suite there and record the counter rows in `docs/benchmarks/`;
+  until then the two scorecard rows stay honestly blocked, not faked.
 
 ## U-007 — Git history below the v2.0.0 squash points
 

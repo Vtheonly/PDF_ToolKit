@@ -1,28 +1,40 @@
 # Native Engine — Target Tree & Coexistence Model (issue #1)
 
-Status: **Phase 0 scaffolding landed (task 0.1 done, task 1.2 in
-progress)**. The Python engine remains the authoritative implementation
-until the native core reaches parity and the audit's performance gates
-pass (AGENTS.md §5.6).
+Status: **Phase 0 scaffolding landed (task 0.1 + 0.2 done, task 1.2 done)**.
+The Python engine remains the authoritative implementation until the
+native core reaches parity and the audit's performance gates pass
+(AGENTS.md §5.6).
 
 ## What exists today (verified 2026-10-09)
 
 ```
 native/
-├── CMakeLists.txt              real build logic: 4 targets + 6 ctests
+├── CMakeLists.txt              real build logic: 4 targets + 6 ctests + benchmarks
+│                               (PDTK_ENABLE_BENCHMARKS, default ON — ADR-0005)
 ├── cmake/CompilerWarnings.cmake  zero-warning profile (-Werror)
 ├── include/pdftoolkit/
 │   ├── pdftoolkit.h            C-ABI: 6 PDTK_API functions, panic-proof
 │   ├── errors.hpp              ErrorCode enum mirrored from C codes
 │   ├── version.hpp             native_version() -> "0.1.0"
-│   └── memory/arena.hpp        BumpArena (task 1.2, tested)
+│   └── memory/arena.hpp        BumpArena (task 1.2 done, measured via task 0.2)
 ├── src/
 │   ├── core/{version,errors}.cpp
 │   ├── memory/arena.cpp        cross-platform aligned alloc
 │   ├── ffi/pdftoolkit.cpp      EngineHandle + C-ABI implementations
 │   ├── python/pdftoolkit_native.cpp  raw C-API extension module
 │   └── cli/main.cpp            --version; subcommands arrive with 7.3
-└── tests/                      minimal harness (ADR-0003) + pure-C smoke
+├── benchmarks/                 pdtk_bench_* (audit task 0.2, ADR-0005; a bench
+│   └── bench_arena.cpp           exists only when its component does — map
+│                               at the top of benchmarks/CMakeLists.txt)
+└── tests/                      minimal harness (ADR-0003; migration deferred, U-009)
+```
+
+Sibling directories from the same audit task (not native code, so they
+live outside `native/`, ADR-0002):
+
+```
+scripts/run_perf.sh            benchmark runner + perf stat stage (see U-010)
+docs/benchmarks/                recorded results — the only citable perf numbers
 ```
 
 Verified: zero-warning build (GCC 14.2, C++20), ctest 6/6, `nm -D` shows
@@ -35,11 +47,14 @@ from Python, CLI runs.
 repository root
 ├── CMakeLists.txt          ← thin shim: add_subdirectory(native) ONLY
 ├── pyproject.toml          ← Python packaging (unchanged)
+├── scripts/run_perf.sh     ← benchmark runner (audit task 0.2)
+├── docs/benchmarks/        ← recorded benchmark results (citable numbers)
 ├── src/pdftoolkit/         ← Python engine (production)
 └── native/                 ← ALL C++20 code lives here
     ├── CMakeLists.txt      ← real build logic
     ├── include/pdftoolkit/ ← public headers (audit: include/pdftoolkit/*)
     ├── src/                ← implementation (audit: src/*)
+    ├── benchmarks/         ← pdtk_bench_* targets (audit: benchmarks/*)
     └── tests/              ← native tests (ctest-registered)
 ```
 

@@ -27,6 +27,7 @@ State you must know before working is kept in:
 | `docs/recovery/unknowns.md` | Open questions, assumptions, unverified areas |
 | `docs/recovery/change-log.md` | Significant discoveries and completed changes, newest first |
 | `docs/architecture/` | Current-state architecture maps (Python engine + native tree) |
+| `docs/benchmarks/` | Recorded benchmark results — the only citable performance numbers |
 | `docs/decisions/` | ADRs: every irreversible engineering decision and its reasoning |
 
 ---
@@ -146,8 +147,13 @@ C++20 systems engine. Rules for that work:
    feature parity and the audit's performance gates pass. Native work is
    additive scaffolding until then — do not delete or stub Python
    capabilities in favor of unfinished native ones.
-7. **Every performance claim needs a benchmark** (Google Benchmark, Task 0.2)
-   before it is stated in docs or commit messages.
+7. **Every performance claim needs a recorded benchmark** (Google
+   Benchmark, task 0.2 — policy ADR-0005): the pipeline is
+   `native/benchmarks/` (behind `PDTK_ENABLE_BENCHMARKS`, default ON;
+   benchmarks exist only when the components they measure exist), the
+   runner is `scripts/run_perf.sh`, and results are recorded under
+   `docs/benchmarks/` — a number not recorded there, with its command and
+   environment, may not be cited anywhere (docs, registries, commits).
 
 ## 6. Commit message format
 
@@ -184,6 +190,9 @@ Related: <problem-registry ids, ADR numbers, previous commits>
   `.venv/bin/ninja`) — cmake/ninja are NOT system-installed.
 * **No clang locally** → MemorySanitizer presets cannot be verified locally
   (MSan requires clang); they are CI-only. ASan/UBSan/TSan work with GCC.
+* **No perf locally** → the `perf stat` stage of `scripts/run_perf.sh`
+  prints `SKIPPED (<reason>)` and exits 0 (U-010). A missing perf is never
+  a benchmark failure; hosted CI runners are expected to behave the same.
 * The full Python suite needs the `http` extra installed or
   `tests/adapters/test_http.py` fails at *collection* (it does not skip) —
   an environment pitfall recorded in the problem registry.

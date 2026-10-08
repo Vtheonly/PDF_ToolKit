@@ -25,7 +25,7 @@ issue #1). Pre-issues use the `T-NNN` prefix.
 | ID | Task | Status | Evidence / Notes |
 |----|------|--------|------------------|
 | issue-1/task-0.1 | Build system setup (CMake + Ninja, four modular targets) | `done` | Verified: fresh `cmake -B build -G Ninja && ninja -C build` (GCC 14.2, C++20, `-Wall -Wextra -Wpedantic -Wconversion -Werror`) → all four targets build with **zero warnings** (strict grep `warning:|error:` → 0). `ctest` → 6/6 passed. `nm -D` → FFI exports exactly the 6 `pdftoolkit_*` C symbols (pure C-ABI). CLI runs; Python extension imports. See ADR-0002, ADR-0003. |
-| issue-1/task-0.2 | Automated benchmarking pipeline (Google Benchmark) | `pending` | Requires FetchContent network access at configure time — see ADR-0003 for the deferral rationale. |
+| issue-1/task-0.2 | Automated benchmarking pipeline (Google Benchmark) | `done` | Pipeline: `PDTK_ENABLE_BENCHMARKS` option (default ON, ADR-0005, resolves U-006) + `FetchContent` google/benchmark **v1.9.5 pinned**; `native/benchmarks/` (bench exists only when its component exists — see P-012); `scripts/run_perf.sh` (single invocation per binary; perf stage degrades honestly). Verified 2026-10-09: zero-warning build; `scripts/run_perf.sh --json ...` → console+JSON report, perf stage `SKIPPED (perf not installed)` exit 0 (U-010 behaviour); offline path `-DPDTK_ENABLE_BENCHMARKS=OFF` → no `_deps`, 6/6 ctest; asan/tsan re-verified with benchmarks OFF (5/5 each, no FetchContent — preset change verified); debug 6/6; Python 644; ci.yml gains a benchmark step (first live CI run pending on push). Authoritative recording: `docs/benchmarks/2026-10-09-phase0-arena-baseline.md`. |
 | issue-1/task-0.3 | Sanitizers and hardening pipeline (`CMakePresets.json`, CI) | `done` | Local (GCC 14.2): `release` 6/6, `debug` 6/6, `asan` (ASan+UBSan, `-fno-sanitize-recover=all`) 5/5 zero findings, `tsan` 5/5 zero findings, all with 0 compiler diagnostics. **First live CI run: SUCCESS** (run 37820960657 on a9c5e98 — all 5 job instances green: pytest py3.9, pytest py3.12, native release, native asan, native tsan). `msan` preset remains clang-only (P-008; GCC rejects it, verified). |
 
 ### Phase 1 — Native memory subsystem & virtual page slabs
@@ -33,7 +33,7 @@ issue #1). Pre-issues use the `T-NNN` prefix.
 | ID | Task | Status | Evidence / Notes |
 |----|------|--------|------------------|
 | issue-1/task-1.1 | Guarded memory-mapped buffer manager (`MmapHandle`) | `pending` | Depends on 0.1. |
-| issue-1/task-1.2 | Thread-local bump-pointer arena allocator | `in_progress` | `BumpArena` implemented per audit spec + hardening (capacity rounding for `aligned_alloc`, non-copyable/movable, count-overflow guard) in `native/include/pdftoolkit/memory/arena.hpp`; 11/11 unit tests pass (alignment, sequencing, exhaustion, reset, move semantics, overflow). Indicative timing: 1,000,000 allocs + reset = **423,258 ns** (~0.42 ns/alloc). REMAINING: authoritative Google Benchmark measurement (blocked on task 0.2) and the audit's mis-scaled acceptance bound — see P-011. |
+| issue-1/task-1.2 | Thread-local bump-pointer arena allocator | `done` | `BumpArena` per audit spec + hardening (capacity rounding, non-copyable/movable, count-overflow guard); 11/11 unit tests green. **Authoritative measurement recorded** (delivered by task 0.2): 1M allocs + reset = mean 485.48 us, P50 482.15 / P90 496.27 / P99 513.31 us (20 reps, CV 2.4%); steady-state alloc+reset pair = **0.28 ns** (~0.9 cycles @3.2 GHz); ~2.06e9 allocs/s. Evidence: `docs/benchmarks/2026-10-09-phase0-arena-baseline.md`; regression guard < 10 ms in `test_arena.cpp` (Release-only). The audit-text correction (P-011) remains an open action for the audit owner. |
 | issue-1/task-1.3 | Unified Page Slab (UPS) binary layout | `pending` | Depends on 1.1, 1.2. `static_assert(sizeof(PageSlabHeader) == 64)`. |
 
 ### Phase 2 — PDF binary protocol, object graph, SIMD decompression
@@ -95,20 +95,22 @@ issue #1). Pre-issues use the `T-NNN` prefix.
 
 ## Next tasks (recommended order)
 
-1. **issue-1/task-0.2** — Google Benchmark pipeline (needs the
-   FetchContent network policy decision, ADR-0003/U-006; also unlocks the
-   authoritative BumpArena measurement to close task 1.2).
-2. **issue-1/task-1.1** — `MmapHandle` (guarded memory-mapped buffer
-   manager; audit spec is prescriptive; unblocks 1.3 and Phase 2).
-3. **issue-1/task-1.3** — Unified Page Slab layout (`static_assert`
-   header + `PageSlabView` span accessors).
-4. **U-002 follow-up** — confirm the first live CI run (runner toolchain,
-   msan-with-clang job if pursued).
-5. **P-011 follow-up** — ask the audit owner to correct the mis-scaled
-   task-1.2 acceptance bound in `docs/issues.md` / issue #1.
+1. **issue-1/task-1.1** — `MmapHandle` (guarded memory-mapped buffer manager;
+   audit spec is prescriptive; unblocks 1.3 and Phase 2). Land `pdtk_bench_mmap`
+   with it (the component-exists rule, `native/benchmarks/CMakeLists.txt`).
+2. **issue-1/task-1.3** — Unified Page Slab layout (`static_assert` header +
+   `PageSlabView` span accessors) + `pdtk_bench_slab`.
+3. **MSan-with-clang CI job** (U-002 remainder) — pursue when Phase 1+
+   code justifies the instrumented-libc++ setup cost.
+4. **P-011 follow-up** — audit owner corrects the mis-scaled task-1.2 bound
+   and the task-0.2 dependency inversion (P-012) in `docs/issues.md` /
+   issue #1.
+5. **P-012 follow-up** — when landing bench_wand (task 4.2), satisfy the
+   audit's original task-0.2 acceptance literally.
 
 ## Session log
 
 | Date | Session | Tasks progressed |
 |------|---------|------------------|
+| 2026-10-09 | Session 2 (0.2 + 1.2 closure) | Baseline re-verified green (Python 644, native 6/6). issue-1/task-0.2 done (pipeline + pdtk_bench_arena + run_perf.sh + CI step; ADR-0005; P-012; U-006 resolved; U-009/U-010 filed). issue-1/task-1.2 closed with the authoritative measurement. Verification matrix: offline 6/6, asan 5/5, tsan 5/5, debug 6/6, Python 644, YAML/JSON valid. |
 | 2026-10-09 | Session 1 (issue-#1 kickoff) | T-000 verified N/A; T-001..T-004 done; baseline 644/644 green established; issue-1/task-0.1 done; issue-1/task-0.3 done (CI first run pending); issue-1/task-1.2 in progress (arena + 11 tests; benchmark pending 0.2); discoveries P-006..P-011, U-001..U-008 filed; ADR-0001..0004 recorded. |

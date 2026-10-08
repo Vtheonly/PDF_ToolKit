@@ -41,6 +41,11 @@ jobs:
         run: cmake --build --preset release
       - name: Test
         run: ctest --preset release
+      # Audit task 0.2: automated benchmark run on every push. perf stat is
+      # expected to be SKIPPED on hosted runners (U-010); the latency
+      # benchmarks must still run and pass.
+      - name: Benchmarks (audit task 0.2)
+        run: scripts/run_perf.sh --json build/release/native/benchmarks/reports build/release/native/benchmarks
 
   native-asan:
     name: Native core (AddressSanitizer + UBSan)

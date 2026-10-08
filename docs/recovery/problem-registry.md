@@ -136,6 +136,38 @@ history — do not delete them.
   skip). Recorded so the next agent does not misread a collection error as
   engine breakage.
 
+## P-012 — Audit task-0.2 acceptance criterion depends on Phase 4 components (audit defect)
+
+* **Where:** `docs/issues.md` (issue #1), Task 0.2 acceptance: "Automated
+  execution of `./build/benchmarks/bench_wand` outputs statistical latency
+  curves" — and its dependency line: "Dependencies / Prerequisites:
+  Task 0.1".
+* **What:** the acceptance names four benchmark files (`bench_mmap`,
+  `bench_lexer`, `bench_slab`, `bench_wand`), but three of the four measure
+  engines that do not exist in Phase 0: `bench_wand` needs the Block-Max
+  WAND engine (task 4.2), `bench_lexer` the zero-copy tokenizer (2.3),
+  `bench_slab` the page slab (1.3). Only `bench_mmap` (task 1.1) is one
+  phase away. The stated prerequisite (0.1 only) is wrong for the
+  benchmark set as written — same planning-defect class as P-011
+  (acceptance text inconsistent with the plan's own dependencies).
+* **Resolution implemented (2026-10-09):** the *pipeline* landed in task
+  0.2 (option-gated FetchContent, runner script, percentile method,
+  recording policy — ADR-0005); each bench file lands **with the task
+  that builds its component** (`bench_arena` closed task 1.2 in the same
+  commit; `bench_mmap` arrives with 1.1, `bench_slab` with 1.3,
+  `bench_lexer` with 2.3, `bench_wand` with 4.2 — map recorded at the top
+  of `native/benchmarks/CMakeLists.txt`). Benchmarks never fake numbers
+  for unbuilt engines (the honest-stub principle applied to the pipeline
+  itself). Acceptance reinterpreted as: automated execution of the
+  *available* benchmark targets outputs statistical latency distributions
+  — satisfied since 2026-10-09.
+* **Action for the audit owner:** correct task 0.2's dependency line and
+  acceptance text in `docs/issues.md` / issue #1, and note the path
+  translation `benchmarks/*` → `native/benchmarks/*` (ADR-0002 mapping).
+* **Status:** `open` (audit text correction outstanding; code side done —
+  the literal `bench_wand` acceptance becomes satisfiable when task 4.2
+  lands).
+
 ## P-011 — Audit task-1.2 acceptance criterion is physically mis-scaled (audit defect)
 
 * **Where:** `docs/issues.md` (issue #1), Task 1.2 acceptance: "Benchmark
@@ -155,8 +187,13 @@ history — do not delete them.
   "30 µs for 1,000 allocations" or "30 ms" and scaled inconsistently.
 * **Resolution:** treat the *intent* (bump allocation ≈ free, O(1) reset)
   as authoritative, not the literal number. The regression guard in the
-  test asserts < 10 ms; the authoritative measurement lands with Google
-  Benchmark (task 0.2). **Action for the audit owner:** correct the
-  criterion in `docs/issues.md` / issue #1.
-* **Status:** `open` (audit text itself needs amendment; code side is
-  done and guarded).
+  test asserts < 10 ms; the authoritative measurement landed with Google
+  Benchmark (task 0.2, 2026-10-09): mean **485.48 us**, P50 482.15 /
+  P90 496.27 / P99 513.31 us (20 repetitions, CV 2.4%); steady-state
+  alloc+reset pair **0.28 ns** — ~16x the audit's literal bound while at
+  the hardware floor. Recording:
+  `docs/benchmarks/2026-10-09-phase0-arena-baseline.md`.
+  **Action for the audit owner:** correct the criterion in
+  `docs/issues.md` / issue #1.
+* **Status:** `open` (audit text amendment outstanding — the only remaining
+  action; the code side is done, measured and guarded).

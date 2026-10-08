@@ -6,6 +6,50 @@ for end users.
 
 ---
 
+## 2026-10-09 — Session 2: issue-1/task-0.2 done (benchmark pipeline); task-1.2 closed
+
+* **Benchmarking pipeline landed (audit task 0.2):** `PDTK_ENABLE_BENCHMARKS`
+  option (default ON) + FetchContent `google/benchmark` **v1.9.5 pinned**
+  (`native/CMakeLists.txt`); `native/benchmarks/` with `pdtk_bench_arena`;
+  `scripts/run_perf.sh` (discovery, single invocation per binary, perf-stat
+  stage with honest degradation); CI native-release job now runs the suite
+  on every push. Sanitizer presets build with benchmarks OFF. Policy:
+  **ADR-0005** (resolves U-006).
+* **Task-1.2 closed with the authoritative measurement:** 1M allocs+reset =
+  mean 485.48 us, P50 482.15 / P90 496.27 / P99 513.31 us (20 reps, CV
+  2.4%); alloc+reset pair = 0.28 ns. Recording:
+  `docs/benchmarks/2026-10-09-phase0-arena-baseline.md` (P-011 updated).
+* **Discovery P-012 (audit defect, same class as P-011):** task 0.2's
+  acceptance names `bench_wand` whose engine arrives in Phase 4 (task 4.2);
+  the audit's "depends on 0.1" line is wrong for three of its four named
+  benches. Resolution: each bench lands with the task that builds its
+  component; the map is recorded in `native/benchmarks/CMakeLists.txt`.
+* **Pipeline discoveries (would cost a future agent real time):**
+  * running a benchmark binary twice (console + JSON) yields two
+    independent measurements that drifted 0.3-4% in the mean — the runner
+    now invokes each binary exactly once (ADR-0005);
+  * `ReportAggregatesOnly(true)` discards the per-repetition samples the
+    P50/P90/P99 computation needs — forbidden for distribution-claiming
+    benchmarks (percentile method + policy: `docs/benchmarks/README.md`);
+  * google/benchmark v1.9.5 JSON tags per-repetition entries
+    `"run_type": "iteration"` (not `"run"`), and has **no native percentile
+    output** — nearest-rank percentiles are computed from the samples;
+  * `perf` is not installed in the reference environment (U-010);
+    `scripts/run_perf.sh` prints `SKIPPED (<reason>)` and exits 0 —
+    a missing perf must never be misread as a benchmark failure.
+* **GoogleTest deferral (U-009):** ADR-0003 predicted GoogleTest would land
+  with task 0.2; scope-corrected by ADR-0005 — the harness survives until a
+  test need exceeds it (expected: Phase 2 corpora / task 5.1 expected-error
+  tests). The stale prediction in `native/CMakeLists.txt`'s test-section
+  comment was fixed in the same commit.
+* **Verification matrix (all 2026-10-09, GCC 14.2):** release zero-warning
+  build; offline `-DPDTK_ENABLE_BENCHMARKS=OFF` → no `_deps`, ctest 6/6;
+  asan 5/5 and tsan 5/5 (both with no FetchContent — preset change
+  verified); debug 6/6 (benchmarks built at -O0, not run); Python 644
+  passed; ci.yml YAML + CMakePresets.json validity checked.
+
+---
+
 ## 2026-10-09 — Session 1, continued: issue-1/task-0.1 done (native build system)
 
 * **Native C++20 build system landed (audit task 0.1):** root `CMakeLists.txt`

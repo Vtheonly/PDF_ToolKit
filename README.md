@@ -128,16 +128,23 @@ A C++20 native core is being built under `native/` per
 [issue #1](https://github.com/Vtheonly/PDF_ToolKit/issues/1) — the
 re-architecture from Python wrapper to high-throughput systems engine.
 The Python engine above remains the authoritative implementation until
-the native core reaches parity. Current state (Phase 0):
+the native core reaches parity. Current state: Phase 0 complete + the
+memory-arena task (1.2) measured.
 
 ```bash
-cmake -B build -G Ninja -DPython3_EXECUTABLE=$(which python)  # needs cmake+ninja
-cmake --build build          # 4 targets: core, ffi, py extension, cli — zero warnings
-ctest --test-dir build       # native test suite
-./build/native/pdftoolkit_cli --version
+cmake --preset release -DPython3_EXECUTABLE=$(which python)  # needs cmake+ninja
+cmake --build --preset release   # targets: core, ffi, py extension, cli + benchmarks
+ctest --preset release           # native test suite
+./build/release/native/pdftoolkit_cli --version
+
+scripts/run_perf.sh              # automated benchmarks (+ perf stat when perf exists;
+                                  # SKIPPED honestly otherwise, see docs/recovery U-010)
 ```
 
-Progress, decisions and verification evidence live in
+Offline builds skip the FetchContent benchmark suite with
+`-DPDTK_ENABLE_BENCHMARKS=OFF` (policy: ADR-0005). Recorded results — the
+only citable performance numbers — live in `docs/benchmarks/`; progress,
+decisions and verification evidence live in
 [`docs/recovery/task-registry.md`](docs/recovery/task-registry.md).
 
 ## License note

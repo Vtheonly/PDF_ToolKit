@@ -25,37 +25,40 @@
     {
       "name": "asan",
       "displayName": "AddressSanitizer + UBSan (GCC/Clang)",
-      "description": "Debug build instrumented with -fsanitize=address,undefined and -fno-sanitize-recover=all (any sanitizer finding fails the test). The python_import_smoke ctest is excluded here: loading an instrumented module into an uninstrumented CPython is unsupported by the toolchain and meaningless for finding engine bugs.",
+      "description": "Debug build instrumented with -fsanitize=address,undefined and -fno-sanitize-recover=all (any sanitizer finding fails the test). The python_import_smoke ctest is excluded here: loading an instrumented module into an uninstrumented CPython is unsupported by the toolchain and meaningless for finding engine bugs. Benchmarks are disabled here (PDTK_ENABLE_BENCHMARKS=OFF, ADR-0005).",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/asan",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer",
-        "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer"
+        "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer",
+        "PDTK_ENABLE_BENCHMARKS": "OFF"
       }
     },
     {
       "name": "tsan",
       "displayName": "ThreadSanitizer (GCC/Clang)",
-      "description": "Debug build instrumented with -fsanitize=thread. Foundation for the concurrency tests of issue-1 tasks 6.1-6.3; today's suite is single-threaded, so this verifies instrumentation, linking and a clean baseline. python_import_smoke is excluded for the same reason as in the asan preset.",
+      "description": "Debug build instrumented with -fsanitize=thread. Foundation for the concurrency tests of issue-1 tasks 6.1-6.3; today's suite is single-threaded, so this verifies instrumentation, linking and a clean baseline. python_import_smoke is excluded for the same reason as in the asan preset. Benchmarks are disabled here (PDTK_ENABLE_BENCHMARKS=OFF, ADR-0005).",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/tsan",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
-        "CMAKE_C_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer"
+        "CMAKE_C_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
+        "PDTK_ENABLE_BENCHMARKS": "OFF"
       }
     },
     {
       "name": "msan",
       "displayName": "MemorySanitizer (clang + instrumented libc++ ONLY)",
-      "description": "CI-only preset: GCC does not implement -fsanitize=memory (docs/recovery/problem-registry.md P-008), and a meaningful MSan run requires every linked library (including the C++ standard library) to be instrumented, i.e. a clang + MSan-instrumented libc++ toolchain. Configure with a clang toolchain, e.g.: CC=clang CXX=clang++ cmake --preset msan.",
+      "description": "CI-only preset: GCC does not implement -fsanitize=memory (docs/recovery/problem-registry.md P-008), and a meaningful MSan run requires every linked library (including the C++ standard library) to be instrumented, i.e. a clang + MSan-instrumented libc++ toolchain. Configure with a clang toolchain, e.g.: CC=clang CXX=clang++ cmake --preset msan. Benchmarks are disabled here (PDTK_ENABLE_BENCHMARKS=OFF, ADR-0005).",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/msan",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_CXX_FLAGS": "-fsanitize=memory -fno-omit-frame-pointer",
-        "CMAKE_C_FLAGS": "-fsanitize=memory -fno-omit-frame-pointer"
+        "CMAKE_C_FLAGS": "-fsanitize=memory -fno-omit-frame-pointer",
+        "PDTK_ENABLE_BENCHMARKS": "OFF"
       }
     }
   ],

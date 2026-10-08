@@ -98,7 +98,8 @@ if(TARGET pdtk_native_arch)
 endif()
 
 # ---------------------------------------------------------------------------
-# Tests (minimal in-repo harness; superseded by GoogleTest in task 0.2, ADR-0003)
+# Tests (minimal in-repo harness, ADR-0003; GoogleTest migration deferred —
+# see ADR-0005 and unknowns U-009. Do not grow the harness.)
 # ---------------------------------------------------------------------------
 if(PDTK_BUILD_TESTS)
   add_executable(pdtk_test_arena tests/test_arena.cpp)
@@ -126,4 +127,25 @@ if(PDTK_BUILD_TESTS)
             "PYTHONPATH=$<TARGET_FILE_DIR:pdftoolkit_py>"
             ${Python3_EXECUTABLE} -c
             "import pdftoolkit_native as m; v = m.native_version(); assert isinstance(v, str) and v; assert m.error_message(0) == 'ok'; assert m.engine_smoke(); print('python import ok:', v)")
+endif()
+
+# ---------------------------------------------------------------------------
+# Benchmarks (audit issue-1/task-0.2; policy: ADR-0005, resolves U-006)
+# ---------------------------------------------------------------------------
+option(PDTK_ENABLE_BENCHMARKS
+       "Fetch Google Benchmark at configure time (needs network) and build the benchmark suite; turn OFF for offline builds (ADR-0005)" ON)
+if(PDTK_ENABLE_BENCHMARKS)
+  include(FetchContent)
+  FetchContent_Declare(
+    benchmark
+    GIT_REPOSITORY https://github.com/google/benchmark.git
+    GIT_TAG        v1.9.5  # pinned release; bump deliberately, never float
+  )
+  # Third-party project: keep it out of our warning profile and testing;
+  # only the benchmark TUs we own are held to the zero-warning policy.
+  set(BENCHMARK_ENABLE_TESTING OFF CACHE INTERNAL "google/benchmark: no self-tests")
+  set(BENCHMARK_ENABLE_INSTALL  OFF CACHE INTERNAL "google/benchmark: no install")
+  set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE INTERNAL "google/benchmark: no gtest")
+  FetchContent_MakeAvailable(benchmark)
+  add_subdirectory(benchmarks)
 endif()
