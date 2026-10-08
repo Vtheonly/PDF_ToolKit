@@ -54,6 +54,9 @@ for end users.
   11/11; asan+ubsan 10/10 (incl. 200 hostile random buffers, re-lexed
   deterministically); tsan 10/10; offline (no FetchContent) 11/11;
   Python 644 passed.
+  **Live CI on the task-2.3 commit (f546fbe): all 5 jobs green** — run
+  37852065321; the benchmark step now runs all four pdtk_bench_*
+  binaries on the hosted runner.
 
 ---
 
@@ -108,6 +111,9 @@ for end users.
   **10/10** (the new `xref` ctest grows the suite from 9); debug 10/10;
   asan+ubsan 9/9; tsan 9/9; offline (no FetchContent) 10/10; Python 644
   passed.
+  **Live CI on the task-2.2 commit (59e6494): all 5 jobs green** — run
+  37850609938 (pytest py3.9/3.12, native release + benchmarks, asan,
+  tsan).
 
 ---
 
