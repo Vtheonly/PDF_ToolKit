@@ -126,3 +126,6 @@ tmp/
 *.tmp
 *.temp
 merged.pdf
+.venv/
+build*/
+native/build/
