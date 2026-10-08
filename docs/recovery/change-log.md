@@ -133,3 +133,17 @@ for end users.
   `__has_feature`/`__SANITIZE_*` and `NDEBUG`). Rule added to
   dos-and-donts.md: **functional assertions always; wall-clock assertions
   only in Release without instrumentation**.
+
+---
+
+## 2026-10-09 — Session 1, close-out: first live CI run GREEN
+
+* **CI confirmed on first live run** (run 37820960657, commit a9c5e98):
+  all 5 job instances passed — `Python engine (pytest, py3.9)`,
+  `py3.12`, `Native core (release, zero warnings)`,
+  `Native core (AddressSanitizer + UBSan)`, `Native core (ThreadSanitizer)`.
+  Notably this also re-verified the Python engine on **Python 3.9** (the
+  oldest supported version) for the first time, and the native suite on
+  GitHub's GCC — independent toolchain confirmation of the local results.
+* U-002 resolved for the GCC/runner part; MSan-with-clang job remains a
+  deliberate follow-up (needs instrumented libc++).

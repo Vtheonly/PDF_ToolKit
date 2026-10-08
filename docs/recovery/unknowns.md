@@ -19,10 +19,14 @@ entry resolved with a pointer.
 * **Question:** Which GitHub-hosted runner image provides clang 16+ for the
   MemorySanitizer preset, and does `ubuntu-latest`'s default GCC support
   `-fsanitize=thread` cleanly under ctest?
-* **Assumption:** `ubuntu-latest` (24.04) default GCC ≥ 13 handles
-  ASan/UBSan/TSan; MSan needs an explicit clang install step.
-* **How to resolve:** First live CI run of `.github/workflows/ci.yml`
-  (issue-1/task-0.3). Until then MSan remains locally unverified (P-008).
+* **Status:** `resolved` for the GCC part — **first live CI run succeeded**
+  (run 37820960657 on a9c5e98, 2026-10-09): all 5 job instances green
+  (pytest py3.9, pytest py3.12, native release, native asan, native
+  tsan) on `ubuntu-latest`; the `vm.mmap_rnd_bits=28` mitigation worked
+  (or was not needed — it is harmless either way).
+* **Still open:** the MSan-with-clang job — needs a clang toolchain plus
+  an MSan-instrumented libc++ strategy on the runner. Not wired into CI
+  yet; pursue only when Phase 1+ code justifies the setup cost.
 
 ## U-003 — `-march=native` default vs distributable builds
 
