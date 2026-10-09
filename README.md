@@ -130,13 +130,17 @@ re-architecture from Python wrapper to high-throughput systems engine.
 The Python engine above remains the authoritative implementation until
 the native core reaches parity. Current state: Phase 0 complete; the
 Phase 1 memory subsystem (tasks 1.1 guarded `MmapHandle`, 1.2
-`BumpArena`, 1.3 Unified Page Slab) done and measured; Phase 2 nearly
-complete — the backward `startxref`/trailer scanner (task 2.1, SIMD
+`BumpArena`, 1.3 Unified Page Slab) done and measured; Phase 2
+COMPLETE — the backward `startxref`/trailer scanner (task 2.1, SIMD
 needle-matched, 10,000-document acceptance corpus), the dual-mode XRef
-resolver (task 2.2: classic tables, PDF 1.5+ xref streams, /Prev
-chains, corrupt-file linear-scan recovery; 2,000-document corpus) and
-the zero-copy lexer (task 2.3: the audit's PdfToken stream, branchless
-whitespace LUT, 67.7 M tokens/s measured).
+resolver (task 2.2: classic tables, PDF 1.5+ xref streams incl.
+FlateDecode-compressed via the task-2.4 codec, /Prev chains,
+corrupt-file linear-scan recovery; 2,200-document corpus), the
+zero-copy lexer (task 2.3: the audit's PdfToken stream, branchless
+whitespace LUT, 67.7 M tokens/s measured) and the hardware-accelerated
+Flate decompressor (task 2.4: libdeflate v1.26 staged in the
+thread-local arena, decompression-bomb defenses, **1034.7 MB/s
+content-mix mean vs the audit's 800 MB/s/core gate**).
 
 ```bash
 cmake --preset release -DPython3_EXECUTABLE=$(which python)  # needs cmake+ninja

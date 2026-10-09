@@ -21,6 +21,36 @@ endif()
 option(PDTK_WERROR              "Treat compiler warnings as errors (zero-warning policy)" ON)
 option(PDTK_ENABLE_NATIVE_ARCH  "Compile optimized builds with -march=native (see ADR/U-003)" ON)
 option(PDTK_BUILD_TESTS         "Build the native test suite" ON)
+option(PDTK_ENABLE_FLATE
+       "Fetch libdeflate at configure time (needs network) and build the Flate codec (task 2.4); turn OFF for offline builds (ADR-0007)" ON)
+
+# ---------------------------------------------------------------------------
+# libdeflate — hardware-accelerated Flate codec dependency (audit task
+# 2.4; integration policy ADR-0007). The audit's "libdeflater" name
+# refers to this library (see the problem registry). Pinned release;
+# bumps are deliberate, never a floating branch. OFF = the codec compiles
+# as an honest stub and callers keep their degradation paths — the
+# ADR-0003 offline guarantee is preserved by construction.
+# ---------------------------------------------------------------------------
+set(PDTK_HAVE_FLATE 0)
+if(PDTK_ENABLE_FLATE)
+  include(FetchContent)
+  FetchContent_Declare(
+    libdeflate
+    GIT_REPOSITORY https://github.com/ebiggers/libdeflate.git
+    GIT_TAG        v1.26  # pinned release; bump deliberately, never float
+  )
+  # Third-party project: static library only — no shared lib, no gzip
+  # program (avoids its zlib dependency), no self-tests, no install
+  # rules. It stays outside our warning profile and test suite; only the
+  # codec TU we own is held to the zero-warning policy.
+  set(LIBDEFLATE_BUILD_STATIC_LIB ON CACHE INTERNAL "libdeflate: static only")
+  set(LIBDEFLATE_BUILD_SHARED_LIB OFF CACHE INTERNAL "libdeflate: no shared lib")
+  set(LIBDEFLATE_BUILD_GZIP OFF CACHE INTERNAL "libdeflate: no gzip program")
+  set(LIBDEFLATE_BUILD_TESTS OFF CACHE INTERNAL "libdeflate: no self-tests")
+  FetchContent_MakeAvailable(libdeflate)
+  set(PDTK_HAVE_FLATE 1)
+endif()
 
 # pdftoolkit_core is consumed by the shared FFI library (and the Python
 # module); it must therefore be position-independent. This became
@@ -52,6 +82,7 @@ add_library(pdftoolkit_core STATIC
   src/parser/trailer.cpp
   src/parser/xref.cpp
   src/parser/lexer.cpp
+  src/codec/flate.cpp
 )
 target_include_directories(pdftoolkit_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -65,10 +96,13 @@ set_target_properties(pdftoolkit_core PROPERTIES
 if(TARGET pdtk_native_arch)
   target_link_libraries(pdftoolkit_core PRIVATE pdtk_native_arch)
 endif()
-
-# ---------------------------------------------------------------------------
-# pdftoolkit_ffi - shared library exporting the pure C-ABI
-# ---------------------------------------------------------------------------
+# Flate codec (task 2.4): libdeflate is PRIVATE — the codec header is
+# PIMPL'd, no third-party type leaks into the public API. The capability
+# macro is PUBLIC so tests and benchmarks can branch on it.
+if(PDTK_HAVE_FLATE)
+  target_link_libraries(pdftoolkit_core PRIVATE libdeflate_static)
+endif()
+target_compile_definitions(pdftoolkit_core PUBLIC PDTK_HAVE_FLATE=${PDTK_HAVE_FLATE})
 add_library(pdftoolkit_ffi SHARED
   src/ffi/pdftoolkit.cpp
 )
@@ -135,6 +169,14 @@ if(PDTK_BUILD_TESTS)
   add_executable(pdtk_test_lexer tests/test_lexer.cpp)
   target_link_libraries(pdtk_test_lexer PRIVATE pdftoolkit_core pdtk_warnings)
 
+  add_executable(pdtk_test_flate tests/test_flate.cpp)
+  target_link_libraries(pdtk_test_flate PRIVATE pdftoolkit_core pdtk_warnings)
+  if(PDTK_HAVE_FLATE)
+    # The suite builds its own zlib-wrapped fixtures with libdeflate's
+    # compressor (tests must be self-contained — no binary fixtures).
+    target_link_libraries(pdtk_test_flate PRIVATE libdeflate_static)
+  endif()
+
   add_executable(pdtk_test_ffi tests/test_ffi.cpp)
   target_link_libraries(pdtk_test_ffi PRIVATE pdftoolkit_ffi pdtk_warnings)
 
@@ -150,6 +192,7 @@ if(PDTK_BUILD_TESTS)
   add_test(NAME trailer      COMMAND pdtk_test_trailer)
   add_test(NAME xref         COMMAND pdtk_test_xref)
   add_test(NAME lexer        COMMAND pdtk_test_lexer)
+  add_test(NAME flate        COMMAND pdtk_test_flate)
   add_test(NAME ffi          COMMAND pdtk_test_ffi)
   add_test(NAME c_abi_smoke  COMMAND pdtk_c_abi_smoke)
   add_test(NAME cli_version  COMMAND pdftoolkit_cli --version)

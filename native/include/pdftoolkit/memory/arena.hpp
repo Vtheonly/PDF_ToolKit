@@ -83,6 +83,21 @@ public:
     /// O(1) bulk deallocation of every slice handed out so far.
     void reset() noexcept { offset_ = 0; }
 
+    /// Rewinds the bump pointer to a mark captured earlier via
+    /// `used_bytes()` (task 2.4: speculative sub-allocations that may
+    /// need to grow, e.g. decompression staging chunks). Only ever
+    /// rewinds: a mark at or past the current offset is ignored, so a
+    /// stale mark can never push the pointer forward or past the
+    /// capacity invariant. Slices handed out after `mark` become
+    /// logically dead — the caller guarantees nobody still holds them.
+    /// The next `alloc_slice` re-aligns, so a mid-alignment mark is
+    /// legal (it only costs a few bytes of padding).
+    void rewind_to(std::size_t mark) noexcept {
+        if (mark < offset_) {
+            offset_ = mark;
+        }
+    }
+
     [[nodiscard]] std::size_t used_bytes() const noexcept { return offset_; }
     [[nodiscard]] std::size_t capacity_bytes() const noexcept { return capacity_; }
     [[nodiscard]] bool valid() const noexcept { return buffer_ != nullptr; }

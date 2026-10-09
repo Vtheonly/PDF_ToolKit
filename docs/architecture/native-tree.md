@@ -19,7 +19,8 @@ native/
 │   │                           exceptions; never crosses extern "C")
 │   ├── version.hpp             native_version() -> "0.1.0"
 │   ├── memory/
-│   │   ├── arena.hpp           BumpArena (task 1.2 done, measured via task 0.2)
+│   │   ├── arena.hpp           BumpArena (task 1.2 done, measured via task 0.2;
+│   │                       rewind_to speculative marks since task 2.4)
 │   │   ├── mmap.hpp            MmapHandle (task 1.1 done — guarded SIGBUS design,
 │   │   │                       ADR-0006; immutable spans; madvise hints)
 │   │   └── page_slab.hpp       UPS layout: PageSlabHeader (64 B exactly — audit's
@@ -33,6 +34,11 @@ native/
 │       │                       resolver; from_linear_scan() trust flag)
 │       └── lexer.hpp           ZeroCopyLexer + PdfToken (task 2.3 done — audit's
 │                               token enum + EndOfFile; zero-copy string_views)
+│   └── codec/
+│       └── flate.hpp           FlateDecompressor + FlateLimits/Result/Status
+│                               (task 2.4 done — libdeflate v1.26 behind
+│                               PDTK_ENABLE_FLATE, ADR-0007; PIMPL'd, no
+│                               third-party types in the public API)
 ├── src/
 │   ├── core/{version,errors}.cpp
 │   ├── memory/
@@ -50,10 +56,19 @@ native/
 │   │   │                       string/nesting-aware trailer dict extraction
 │   │   ├── xref.cpp            classic tables + xref streams (/W, /Index,
 │   │   │                       type 0/1/2) + /Prev chains + /XRefStm hybrids
-│   │   │                       + emergency linear scan + 10M-object cap
-│   │   └── lexer.cpp           token stream over the branchless 256-entry
-│                               whitespace LUT; from_chars numbers; iterative
-│                               tolerant skips (no recursion on junk)
+│   │   │                       + emergency linear scan + 10M-object cap;
+│   │   │                       FlateDecode streams first-class via the
+│   │   │                       codec (P-017a) into a lazily created scratch
+│   │   │                       arena, same decode_rows; predictor /
+│   │   │                       non-Flate / indirect-/Length degrade (P-020/21)
+│   │   ├── lexer.cpp           token stream over the branchless 256-entry
+│   │   │                       whitespace LUT; from_chars numbers; iterative
+│   │   │                       tolerant skips (no recursion on junk)
+│   │   └── codec/
+│   │       └── flate.cpp       zlib-wrapper inflate staged in doubling arena
+│                               chunks (8x guess, rewind-retry, fit-to-arena);
+│                               bomb defenses 128x / 64 MiB / hint; offline
+│                               stub returns Unavailable
 │   ├── ffi/pdftoolkit.cpp      EngineHandle + C-ABI implementations;
 │   │                           register_document mmaps via MmapHandle (task 1.1)
 │   ├── python/pdftoolkit_native.cpp  raw C-API extension module
@@ -62,16 +77,24 @@ native/
 │   ├── bench_arena.cpp           exists only when its component does — map
 │   ├── bench_mmap.cpp            at the top of benchmarks/CMakeLists.txt)
 │   ├── bench_slab.cpp
-│   └── bench_lexer.cpp         + same-run traversal control (U-012 method)
+│   ├── bench_lexer.cpp         + same-run traversal control (U-012 method)
+│   └── bench_flate.cpp         output-MB/s over content/repetitive/
+                                incompressible workloads + control (2.4;
+                                exists only when PDTK_HAVE_FLATE)
 └── tests/                      minimal harness (ADR-0003; migration deferred, U-009)
     ├── test_mmap.cpp           15 cases: truncation acceptance + honesty contract
     ├── test_slab.cpp           16 cases: alignment acceptance + tamper detection
     ├── test_trailer.cpp        31 cases: 10k-document acceptance corpus (×2 for
     │                           SIMD/scalar differential) + mmap zero-copy proof
-    ├── test_xref.cpp           18 cases: 2k-document corpus (classic/incremental/
-    │                           linearized/stream/hybrid/corrupt/Flate) + OOM guard
-    └── test_lexer.cpp          18 cases: token types, escapes, numbers,
-                                stream contract, hostile-buffer determinism
+    ├── test_xref.cpp           23 cases: 2,200-document corpus (classic/incremental/
+    │                           linearized/stream/hybrid/corrupt/Flate-garbage/
+    │                           Flate-REAL) + OOM guard + Flate integration cases
+    ├── test_lexer.cpp          18 cases: token types, escapes, numbers,
+    │                           stream contract, hostile-buffer determinism
+    └── test_flate.cpp          19 cases: round-trips, chunk growth/reuse,
+                                every bomb defense, corruption mapping,
+                                arena integration, determinism (stub case
+                                when compiled out)
 ```
 
 Sibling directories from the same audit task (not native code, so they
@@ -151,7 +174,7 @@ native/include/pdftoolkit/
 ├── pdftoolkit.h                   (task 7.1 — pure C-ABI header)
 ├── memory/   mmap.hpp (1.1 done) · arena.hpp (1.2 done) · page_slab.hpp (1.3 done)
 ├── parser/   trailer.hpp (2.1 done) · xref.hpp (2.2 done) · lexer.hpp (2.3 done)
-├── codec/    flate.hpp (2.4)
+├── codec/    flate.hpp (2.4 done)
 ├── font/     cmap.hpp (3.1)
 ├── layout/   evaluator.hpp (3.2) · materializer.hpp (3.3)
 ├── index/    inverted.hpp (4.1)

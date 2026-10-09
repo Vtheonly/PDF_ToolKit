@@ -168,6 +168,43 @@ PDTK_TEST(million_allocations_and_reset_are_fast) {
 #endif
 }
 
+PDTK_TEST(rewind_to_restores_a_captured_mark) {
+    // Task 2.4 enabler: speculative sub-allocations (decompression
+    // staging chunks) grow by rewind-and-retry, so the arena never
+    // wastes more than one chunk's worth of space.
+    BumpArena arena(1u << 20);  // 1 MiB
+    const auto head = arena.alloc_slice<std::uint8_t>(100);
+    PDTK_ASSERT_EQ(head.size(), std::size_t{100});
+    const std::size_t mark = arena.used_bytes();
+
+    // Speculative chunk that turns out too small: rewind, take a bigger
+    // one starting at the SAME mark — the failed attempt's bytes are
+    // reused, not accumulated.
+    auto chunk1 = arena.alloc_slice<std::uint8_t>(4096);
+    PDTK_ASSERT_EQ(chunk1.size(), std::size_t{4096});
+    arena.rewind_to(mark);
+    auto chunk2 = arena.alloc_slice<std::uint8_t>(16'384);
+    PDTK_ASSERT_EQ(chunk2.size(), std::size_t{16'384});
+    PDTK_ASSERT_EQ(arena.used_bytes(), mark + 16'384);
+    // The retry reuses the same storage (overlap with the dead chunk1).
+    PDTK_ASSERT(chunk2.data() == chunk1.data());
+
+    // The pre-mark allocation is untouched by the rewind.
+    head[0] = 0xAB;
+    PDTK_ASSERT_EQ(head[0], std::uint8_t{0xAB});
+
+    // Forward/stale marks are ignored (never push the pointer forward,
+    // never past capacity): used_bytes() + 1000 and 0 after reset.
+    const std::size_t before = arena.used_bytes();
+    arena.rewind_to(before + 1000);
+    PDTK_ASSERT_EQ(arena.used_bytes(), before);
+    arena.rewind_to(0);
+    PDTK_ASSERT_EQ(arena.used_bytes(), std::size_t{0});
+    // Marks beyond capacity are likewise inert.
+    arena.rewind_to(arena.capacity_bytes() + 1);
+    PDTK_ASSERT_EQ(arena.used_bytes(), std::size_t{0});
+}
+
 }  // namespace
 
 PDTK_TEST_MAIN()

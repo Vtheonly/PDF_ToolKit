@@ -10,6 +10,9 @@
 #   task 1.1 (MmapHandle)     -> pdtk_bench_mmap    (lands with task 1.1)
 #   task 1.3 (PageSlab)       -> pdtk_bench_slab    (landed with task 1.3)
 #   task 2.3 (ZeroCopyLexer)  -> pdtk_bench_lexer   (landed with task 2.3)
+#   task 2.4 (Flate codec)    -> pdtk_bench_flate   (lands with task 2.4;
+#                              exists only when PDTK_HAVE_FLATE - the stub
+#                              measures nothing)
 #   task 4.2 (BlockMaxWand)   -> pdtk_bench_wand    (lands with task 4.2)
 
 # Every benchmark links pdftoolkit_core (reuse: no parallel implementation
@@ -46,4 +49,17 @@ target_link_libraries(pdtk_bench_lexer
   PRIVATE pdftoolkit_core benchmark::benchmark pdtk_warnings)
 if(TARGET pdtk_native_arch)
   target_link_libraries(pdtk_bench_lexer PRIVATE pdtk_native_arch)
+endif()
+
+# task 2.4 (Flate codec) -> pdtk_bench_flate (component-exists rule: the
+# benchmark exists exactly when the real codec does - PDTK_ENABLE_FLATE=OFF
+# compiles a stub that must never produce numbers).
+if(PDTK_HAVE_FLATE)
+  add_executable(pdtk_bench_flate bench_flate.cpp)
+  target_link_libraries(pdtk_bench_flate
+    PRIVATE pdftoolkit_core benchmark::benchmark pdtk_warnings
+            libdeflate_static)
+  if(TARGET pdtk_native_arch)
+    target_link_libraries(pdtk_bench_flate PRIVATE pdtk_native_arch)
+  endif()
 endif()

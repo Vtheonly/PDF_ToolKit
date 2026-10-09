@@ -147,7 +147,13 @@ C++20 systems engine. Rules for that work:
    feature parity and the audit's performance gates pass. Native work is
    additive scaffolding until then — do not delete or stub Python
    capabilities in favor of unfinished native ones.
-7. **Every performance claim needs a recorded benchmark** (Google
+7. **Flate decompression is libdeflate** (task 2.4, ADR-0007):
+   fetched via `FetchContent` behind `PDTK_ENABLE_FLATE` (default ON,
+   pinned release v1.26). Offline builds pass
+   `-DPDTK_ENABLE_FLATE=OFF` and get an honest stub — the xref
+   resolver then degrades Flate streams to the linear scan (P-017a).
+   Do not replace it with system zlib (the audit's explicit intent).
+8. **Every performance claim needs a recorded benchmark** (Google
    Benchmark, task 0.2 — policy ADR-0005): the pipeline is
    `native/benchmarks/` (behind `PDTK_ENABLE_BENCHMARKS`, default ON;
    benchmarks exist only when the components they measure exist), the

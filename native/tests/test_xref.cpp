@@ -3,15 +3,19 @@
 // Acceptance criterion (audit): "Correctly parses both classical tables
 // and compressed streams, verified against a test corpus containing
 // corrupt and linearized PDFs." As with task 2.1 (U-013), the corpus is
-// deterministic and synthetic — 2,000 generated documents spanning
+// deterministic and synthetic — 2,200 generated documents spanning
 // classic tables, incremental-update /Prev chains, linearized-style
 // layouts, XRef streams (variable /W widths, /Index ranges, type-2
-// compressed entries), hybrid /XRefStm files, corrupt newest sections
-// and Flate-filtered streams (the P-017 degradation). Every document's
+// compressed entries), hybrid /XRefStm files, corrupt newest sections,
+// Flate-filtered streams with garbage payloads (the honest degradation)
+// and REAL zlib-compressed Flate streams parsed through the task-2.4
+// codec (P-017a resolved; the same documents degrade to the linear scan
+// when the codec is compiled out). Every document's
 // full expected entry table is known by construction and verified.
 
 #include "test_harness.hpp"
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -55,6 +59,20 @@ void appendf(std::vector<std::uint8_t>& out, const char* fmt, ...) {
     va_end(args);
     append(out, buf);
 }
+
+#if PDTK_HAVE_FLATE
+// Finds a literal byte substring; npos when absent (vector has no find).
+// Only the Flate integration tests use it.
+std::size_t find_bytes(const std::vector<std::uint8_t>& haystack,
+                       const char* needle) {
+    const std::size_t n = std::strlen(needle);
+    const auto it = std::search(haystack.begin(), haystack.end(),
+                                reinterpret_cast<const std::uint8_t*>(needle),
+                                reinterpret_cast<const std::uint8_t*>(needle) + n);
+    return it == haystack.end() ? std::string::npos
+                                : static_cast<std::size_t>(it - haystack.begin());
+}
+#endif  // PDTK_HAVE_FLATE
 
 struct Rng {
     std::uint32_t state;
@@ -383,6 +401,93 @@ Doc make_flate(std::uint32_t seed) {
     return doc;
 }
 
+#if PDTK_HAVE_FLATE
+#include "libdeflate.h"
+
+// Compresses row bytes into a zlib wrapper (the /FlateDecode payload).
+std::vector<std::uint8_t> zlib_wrap(const std::vector<std::uint8_t>& plain,
+                                    int level = 6) {
+    libdeflate_compressor* comp = libdeflate_alloc_compressor(level);
+    PDTK_ASSERT(comp != nullptr);
+    std::vector<std::uint8_t> out(
+        libdeflate_zlib_compress_bound(comp, plain.size()));
+    const std::size_t n = libdeflate_zlib_compress(
+        comp, plain.data(), plain.size(), out.data(), out.size());
+    libdeflate_free_compressor(comp);
+    PDTK_ASSERT(n > 0);
+    out.resize(n);
+    return out;
+}
+
+// REAL Flate-filtered xref stream (task 2.4, P-017a resolution): the
+// rows are genuinely zlib-compressed, the section must parse first
+// class. With the codec compiled out (offline profile) the same
+// document degrades to the linear scan — expected values adapt.
+Doc make_flate_real(std::uint32_t seed) {
+    Rng rng(seed);
+    Doc doc;
+    const std::uint32_t n = 3 + rng.below(20);
+    for (std::uint32_t id = 1; id <= n; ++id) {
+        add_object(doc, id, rng.below(3));
+    }
+    const std::uint32_t objstm = n + 1;
+    add_object(doc, objstm, 0);
+    // A couple of type-2 (compressed-in-ObjStm) rows for good measure.
+    for (std::uint32_t k = 0; k < 2; ++k) {
+        XRefEntry e;
+        e.kind = XRefEntry::Kind::Compressed;
+        e.objstm_object = objstm;
+        e.index_in_objstm = k;
+        doc.expected[objstm + 1 + k] = e;
+    }
+    const std::uint32_t total = objstm + 3;  // ids 0..total-1
+    const std::uint64_t w1 = 1;
+    const std::uint64_t w2 = 2 + rng.below(2);
+    const std::uint64_t w3 = 1;
+
+    std::vector<std::uint8_t> data;
+    for (std::uint32_t id = 0; id < total; ++id) {
+        const auto it = doc.expected.find(id);
+        std::uint64_t type = 1;
+        std::uint64_t f2 = 0;
+        std::uint64_t f3 = 0;
+        if (id == 0) {
+            type = 0;
+            f3 = 65535;
+        } else if (it != doc.expected.end() &&
+                   it->second.kind == XRefEntry::Kind::Compressed) {
+            type = 2;
+            f2 = it->second.objstm_object;
+            f3 = it->second.index_in_objstm;
+        } else if (it != doc.expected.end()) {
+            type = 1;
+            f2 = it->second.offset;
+            f3 = it->second.generation;
+        }
+        put_be(data, type, w1);
+        put_be(data, f2, w2);
+        put_be(data, f3, w3);
+    }
+    const std::vector<std::uint8_t> z = zlib_wrap(data);
+    // Occasionally exercise the legacy /Fl abbreviation of FlateDecode.
+    const char* filter_name = (seed % 3 == 0) ? "/Fl" : "/FlateDecode";
+
+    doc.last_xref_offset = doc.bytes.size();
+    appendf(doc.bytes,
+            "%u 0 obj\n<< /Type /XRef /Size %u /W [%llu %llu %llu] "
+            "/Filter %s /Length %llu >>\nstream\n",
+            objstm, total, static_cast<unsigned long long>(w1),
+            static_cast<unsigned long long>(w2),
+            static_cast<unsigned long long>(w3), filter_name,
+            static_cast<unsigned long long>(z.size()));
+    doc.bytes.insert(doc.bytes.end(), z.begin(), z.end());
+    append(doc.bytes, "\nendstream\nendobj\n");
+    appendf(doc.bytes, "startxref\n%llu\n%%EOF\n",
+            static_cast<unsigned long long>(doc.last_xref_offset));
+    return doc;
+}
+#endif  // PDTK_HAVE_FLATE
+
 // ---------------------------------------------------------------------------
 // Unit cases
 // ---------------------------------------------------------------------------
@@ -689,8 +794,154 @@ PDTK_TEST(flate_stream_falls_back_to_linear_scan) {
     se.offset = stream_at;
     doc.expected[2] = se;
     doc.expect_linear_scan = true;
-    verify(doc);  // P-017: honest degradation
+    verify(doc);  // honest degradation
 }
+
+#if PDTK_HAVE_FLATE
+
+PDTK_TEST(flate_xref_stream_parses_first_class) {
+    // P-017a resolution: genuinely compressed rows, parsed through the
+    // task-2.4 codec — full index, NO linear-scan flag.
+    const Doc doc = make_flate_real(4242);
+    PDTK_ASSERT(!doc.expect_linear_scan);
+    verify(doc);
+}
+
+PDTK_TEST(flate_corrupt_body_degrades_to_linear_scan) {
+    // Valid zlib header, destroyed body: the codec refuses, the scan
+    // rebuilds the honest partial index.
+    Doc doc = make_flate_real(777);
+    doc.expect_linear_scan = true;
+    // Erase the compressed type-2 members (invisible to the scan)...
+    doc.expected.erase(doc.expected.rbegin()->first);
+    doc.expected.erase(doc.expected.rbegin()->first);
+    // ...and remap the stream object: add_object gave it a placeholder
+    // body earlier in the file, but the scan's later-occurrence-wins
+    // binds it to the (later) stream object header.
+    doc.expected[doc.expected.rbegin()->first].offset =
+        doc.last_xref_offset;
+    // Corrupt the payload body (skip the 2-byte zlib header).
+    const std::size_t body = find_bytes(doc.bytes, "stream\n") + 7 + 2;
+    for (std::size_t i = body; i < body + 8 && i < doc.bytes.size(); ++i) {
+        doc.bytes[i] ^= 0x5A;
+    }
+    verify(doc);
+}
+
+PDTK_TEST(flate_predictor_parms_degrade_to_linear_scan) {
+    // /DecodeParms with /Predictor 12 (PNG): unsupported post-inflation
+    // reshuffle — degrade rather than silently mis-decode rows.
+    Doc doc;
+    add_object(doc, 1, 0);
+    add_object(doc, 2, 0);
+    std::vector<std::uint8_t> rows;
+    put_be(rows, 0, 1);
+    put_be(rows, 0, 2);
+    put_be(rows, 65535, 1);
+    put_be(rows, 1, 1);
+    put_be(rows, doc.expected[1].offset, 2);
+    put_be(rows, 0, 1);
+    put_be(rows, 1, 1);
+    put_be(rows, doc.expected[2].offset, 2);
+    put_be(rows, 0, 1);
+    const std::vector<std::uint8_t> z = zlib_wrap(rows);
+    const std::size_t stream_at = doc.bytes.size();
+    appendf(doc.bytes,
+            "3 0 obj\n<< /Type /XRef /Size 4 /W [1 2 1] /Filter "
+            "/FlateDecode /DecodeParms << /Predictor 12 /Columns 4 >> "
+            "/Length %llu >>\nstream\n",
+            static_cast<unsigned long long>(z.size()));
+    doc.bytes.insert(doc.bytes.end(), z.begin(), z.end());
+    append(doc.bytes, "\nendstream\nendobj\n");
+    appendf(doc.bytes, "startxref\n%llu\n%%EOF\n",
+            static_cast<unsigned long long>(stream_at));
+    XRefEntry se;
+    se.kind = XRefEntry::Kind::InUse;
+    se.offset = stream_at;
+    doc.expected[3] = se;
+    doc.expect_linear_scan = true;
+    verify(doc);
+}
+
+PDTK_TEST(flate_indirect_length_degrades_to_linear_scan) {
+    // Indirect /Length cannot be resolved before the index exists: no
+    // trustworthy compressed extent -> honest degradation.
+    Doc doc = make_flate_real(31);
+    // Replace the direct /Length value with an indirect reference.
+    const std::size_t at = find_bytes(doc.bytes, "/Length ");
+    PDTK_ASSERT(at != std::string::npos);
+    const std::size_t val = at + 8;
+    std::size_t sp = val;
+    while (sp < doc.bytes.size() && doc.bytes[sp] != ' ') {
+        ++sp;  // end of the direct-integer value
+    }
+    PDTK_ASSERT(sp < doc.bytes.size());
+    const std::string indirect = "999 0 R";
+    doc.bytes.erase(doc.bytes.begin() + val, doc.bytes.begin() + sp);
+    doc.bytes.insert(doc.bytes.begin() + val, indirect.begin(), indirect.end());
+    doc.expect_linear_scan = true;
+    doc.expected.erase(doc.expected.rbegin()->first);
+    doc.expected.erase(doc.expected.rbegin()->first);
+    // Scan's later-occurrence-wins binds the stream object to its own
+    // (later) header, not the placeholder body from add_object.
+    doc.expected[doc.expected.rbegin()->first].offset =
+        doc.last_xref_offset;
+    verify(doc);
+}
+
+PDTK_TEST(flate_hybrid_companion_stream_parses) {
+    // Classic table + Flate-compressed /XRefStm companion: classic
+    // entries win on overlap, the stream's own entries load first-class.
+    Doc doc;
+    add_object(doc, 1, 0);
+    add_object(doc, 2, 0);
+    add_object(doc, 3, 0);  // stream-only id (classic covers 0..2)
+    // The stream object's own header position is knowable before its
+    // rows are encoded (the rows live INSIDE the object).
+    const std::size_t stream_at = doc.bytes.size();
+    std::vector<std::uint8_t> rows;
+    put_be(rows, 0, 1);
+    put_be(rows, 0, 2);
+    put_be(rows, 65535, 1);
+    put_be(rows, 1, 1);
+    put_be(rows, 4242, 2);  // wrong on purpose: classic must win
+    put_be(rows, 0, 1);
+    put_be(rows, 1, 1);
+    put_be(rows, 4242, 2);  // wrong on purpose: classic must win
+    put_be(rows, 0, 1);
+    put_be(rows, 1, 1);
+    put_be(rows, doc.expected[3].offset, 2);
+    put_be(rows, 0, 1);
+    put_be(rows, 1, 1);  // the stream object's own row (id 4)
+    put_be(rows, stream_at, 2);
+    put_be(rows, 0, 1);
+    const std::vector<std::uint8_t> z = zlib_wrap(rows);
+    appendf(doc.bytes,
+            "4 0 obj\n<< /Type /XRef /Size 5 /W [1 2 1] /Filter "
+            "/FlateDecode /Length %llu >>\nstream\n",
+            static_cast<unsigned long long>(z.size()));
+    doc.bytes.insert(doc.bytes.end(), z.begin(), z.end());
+    append(doc.bytes, "\nendstream\nendobj\n");
+    XRefEntry se;
+    se.kind = XRefEntry::Kind::InUse;
+    se.offset = stream_at;
+    doc.expected[4] = se;
+
+    doc.last_xref_offset = doc.bytes.size();
+    append(doc.bytes, "xref\n0 3\n0000000000 65535 f \n");
+    appendf(doc.bytes, "%010llu 00000 n \n",
+            static_cast<unsigned long long>(doc.expected[1].offset));
+    appendf(doc.bytes, "%010llu 00000 n \n",
+            static_cast<unsigned long long>(doc.expected[2].offset));
+    appendf(doc.bytes,
+            "trailer<< /Size 5 /Root 1 0 R /XRefStm %llu >>\n"
+            "startxref\n%llu\n%%EOF\n",
+            static_cast<unsigned long long>(stream_at),
+            static_cast<unsigned long long>(doc.last_xref_offset));
+    verify(doc);  // first-class: no linear-scan flag
+}
+
+#endif  // PDTK_HAVE_FLATE
 
 PDTK_TEST(no_usable_structure_is_unreadable) {
     const auto doc = "startxref\n5\n%%EOF"_b;  // offset 5 lands on "%%EOF"
@@ -726,11 +977,11 @@ PDTK_TEST(hostile_object_id_cannot_oom) {
 }
 
 // ---------------------------------------------------------------------------
-// Acceptance corpus (2,000 mixed documents)
+// Acceptance corpus (2,200 mixed documents)
 // ---------------------------------------------------------------------------
 
-PDTK_TEST(acceptance_corpus_two_thousand_documents) {
-    constexpr std::uint32_t kCorpus = 2000;
+PDTK_TEST(acceptance_corpus_two_thousand_two_hundred_documents) {
+    constexpr std::uint32_t kCorpus = 2200;
     for (std::uint32_t seed = 0; seed < kCorpus; ++seed) {
         Doc doc;
         if (seed < 500) {
@@ -745,8 +996,16 @@ PDTK_TEST(acceptance_corpus_two_thousand_documents) {
             doc = make_hybrid(seed - 1700);
         } else if (seed < 1950) {
             doc = make_corrupt(seed - 1850);
-        } else {
+        } else if (seed < 2000) {
             doc = make_flate(seed - 1950);
+        } else {
+#if PDTK_HAVE_FLATE
+            doc = make_flate_real(seed - 2000);
+#else
+            // Codec absent: reuse the garbage-payload degradation shape
+            // (deterministic, still distinct documents).
+            doc = make_flate(seed - 1950);
+#endif
         }
         try {
             verify(doc);

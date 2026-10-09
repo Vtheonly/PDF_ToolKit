@@ -295,21 +295,27 @@ history — do not delete them.
   parsing type-2 (compressed, in-ObjStm) entries, which need the
   containing object number AND the index within it — two more fields
   than a uint64 can carry (plus generation for types 0/1).
-* **Resolution implemented (2026-10-09):** (a) the resolver parses
-  UNFILTERED xref streams fully; a Flate-filtered NEWEST section degrades
-  honestly to the emergency linear scan (flagged via
-  `XRefIndex::from_linear_scan()`), which still finds every stand-alone
-  object; when task 2.4 lands, the stream path becomes first-class by
-  feeding the decompressor's output to the same row decoder. (b)
-  `std::vector<XRefEntry>` (a compact POD with Kind/offset/generation/
-  objstm_object/index_in_objstm) — the audit's intent (O(1) id-indexed
-  lookup) is preserved, the representation extended to what step 3
-  requires.
+* **Resolution implemented (2026-10-09; (a) completed by task 2.4):**
+  (a) the resolver parses UNFILTERED xref streams fully, and since task
+  2.4 a `/FlateDecode` xref stream with a direct `/Length` is
+  FIRST-CLASS: the codec decompresses the rows into a lazily created
+  scratch `BumpArena` and feeds them to the same row decoder
+  (`decode_rows`) — exactly the hand-off this entry predicted. Degradation
+  to the emergency linear scan (flagged via `XRefIndex::
+  from_linear_scan()`) remains the honest path for: non-Flate filters,
+  multi-filter pipelines, predictor-bearing `/DecodeParms` (P-020),
+  indirect `/Length`, corrupt payloads, bomb-defense refusals, and
+  offline builds (`PDTK_ENABLE_FLATE=OFF`). (b) `std::vector<XRefEntry>`
+  (a compact POD with Kind/offset/generation/objstm_object/
+  index_in_objstm) — the audit's intent (O(1) id-indexed lookup) is
+  preserved, the representation extended to what step 3 requires.
 * **Action for the audit owner:** amend task 2.2 in `docs/issues.md` /
   issue #1 — add task 2.4 to the dependency line (or mark Flate streams
   as 2.4 scope) and correct the lookup-table type.
-* **Status:** `open` (audit text amendment outstanding; code side done,
-  test-locked — including the Flate degradation case in the corpus).
+* **Status:** `open` (audit text amendment outstanding; code side fully
+  done and test-locked — the 2,200-document corpus now includes 200
+  REAL zlib-compressed Flate xref streams verified first-class, plus
+  degradation cases for every path above).
 
 ## P-016 — Audit task-2.1 hard-codes the backward-scan window at 1024 bytes (audit limitation)
 
@@ -355,3 +361,70 @@ history — do not delete them.
 * **Status:** `open` (audit text amendment outstanding; code side done
   and test-locked — including the acceptance criterion that coordinate
   offsets are 32-byte aligned).
+
+
+## P-021 — Landed task-2.2 code half-parsed indirect `/Length` as a bogus byte count (code defect, fixed by 2.4)
+
+* **Where:** `native/src/parser/xref.cpp`, the xref-stream `/Length`
+  dictionary entry (task-2.2 code as landed in commit 59e6494).
+* **What:** the `/Length` parser accepted any value starting with an
+  integer — an indirect reference (`/Length 999 0 R`) was read as the
+  direct byte count 999 (the reference's object number). Harmless for
+  unfiltered rows (the extent was implicitly bounded by the file size
+  and the row-count checks), but as a FLATE compressed extent it is
+  actively wrong in both directions (a too-small object number truncates
+  the payload; a too-large one feeds trailing `endstream` bytes into
+  the codec).
+* **Why it happened:** task 2.2 only needed `/Length` as a consistency
+  bound; the chicken-and-egg note (indirect /Length unresolvable before
+  the index exists) was documented but the half-parse was not.
+* **What changed (2026-10-09, task 2.4):** `/Length` now goes through
+  the same indirect-reference rejection as `/Prev`/`/XRefStm`
+  (`parse_offset_value`); an indirect `/Length` leaves the section
+  unparseable and the honest linear-scan degradation applies.
+* **Verified:** `flate_indirect_length_degrades_to_linear_scan`
+  (pdtk_test_xref) + the unfiltered corpus unaffected (all direct
+  /Length values).
+* **Status:** `fixed` (regression-locked).
+
+## P-020 — XRef streams with predictor-bearing `/DecodeParms` degrade to the linear scan (deliberate scope line)
+
+* **Where:** `native/src/parser/xref.cpp` (`/DecodeParms` handling).
+* **What:** PDF 1.5+ xref streams may carry `/DecodeParms <<
+  /Predictor 12 /Columns N >>` (PNG prediction) or `/Predictor 2`
+  (TIFF). The resolver detects any predictor >= 2 (and any array-form
+  `/DecodeParms`, i.e. a filter pipeline) and degrades the section to
+  the emergency linear scan instead of decoding.
+* **Why it is deliberate:** silently ignoring the predictor would
+  mis-decode every row (wrong offsets, wrong types) — a CORRUPTED index
+  that looks authoritative is far worse than a flagged partial index.
+  The audit never mentions predictors in any task; there is no
+  prescribed home for the decoder.
+* **Resolution path:** a future task (natural home: Phase 3 ingestion,
+  alongside stream consumers that also meet predictors on content
+  streams) implements PNG/TIFF un-prediction between decompression and
+  row decoding; the plumbing (decompressed rows in the scratch arena)
+  already exists.
+* **Status:** `open` (documented deferral; detection is test-locked by
+  `flate_predictor_parms_degrade_to_linear_scan`).
+
+## P-019 — Audit task-2.4 names "libdeflater" — no such C library exists (audit defect)
+
+* **Where:** `docs/issues.md` (issue #1), Task 2.4.
+* **What:** the audit prescribes integrating "`libdeflater` via CMake
+  FetchContent". `github.com/ebiggers/libdeflater` does not resolve
+  (verified 2026-10-09: git ls-remote fails); "libdeflater" is the name
+  of a Rust *binding crate* for the C library **libdeflate**
+  (ebiggers/libdeflate) — the canonical SIMD-accelerated Flate
+  decoder the audit's description points at (hardware-accelerated,
+  FetchContent-integrable CMake build, MIT-style license).
+* **What was done:** integrated libdeflate **v1.26** (pinned release)
+  under the `PDTK_ENABLE_FLATE` option — policy ADR-0007 (which also
+  covers the offline-build consequence). Gate verified met:
+  1034.7 MB/s mean on the level-6 content mix vs the audit's
+  800 MB/s/core (recording:
+  `docs/benchmarks/2026-10-09-phase2-flate-baseline.md`).
+* **Action for the audit owner:** amend the task-2.4 library name in
+  `docs/issues.md` / issue #1 to `libdeflate`.
+* **Status:** `open` (audit text amendment outstanding; integration
+  done, test-locked).

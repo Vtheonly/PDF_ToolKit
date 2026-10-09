@@ -7,9 +7,10 @@
 //   * classical plaintext tables ("xref\n0 N\n<10-digit> <5-digit> n/f"
 //     subsections, each followed by a `trailer` dictionary);
 //   * PDF 1.5+ /Type /XRef streams (variable-width /W fields, /Index
-//     ranges, type 0/1/2 entries) — UNFILTERED only: Flate-filtered
-//     streams degrade to the emergency scan until task 2.4 lands the
-//     decompressor (P-017);
+//     ranges, type 0/1/2 entries) — unfiltered directly, and
+//     /FlateDecode-filtered via the task-2.4 codec (P-017a resolved:
+//     the decompressed rows feed the same row decoder; predictor-bearing
+//     /DecodeParms and non-Flate filters still degrade honestly);
 //   * /Prev chains (incremental updates, linearized first-page tables)
 //     with newest-entry-wins merge semantics;
 //   * /XRefStm hybrid supplements (classic table + companion stream at
@@ -19,13 +20,20 @@
 //     `N G obj` headers (flagged via XRefIndex::from_linear_scan()).
 //
 // All parsing is zero-copy position arithmetic over the caller's buffer
-// (scan_util.hpp primitives, shared with trailer.cpp since this task).
+// (scan_util.hpp primitives, shared with trailer.cpp since this task);
+// the single exception is Flate-filtered xref streams, whose rows are
+// staged in a lazily created scratch BumpArena (audit task 2.4 step 3)
+// and rewound section-to-section — the rows are consumed into the
+// Builder before the section parse returns, so nothing survives to
+// observe the rewind.
 
 #include "pdftoolkit/parser/xref.hpp"
 
 #include <algorithm>
 #include <cstring>
+#include <optional>
 
+#include "pdftoolkit/codec/flate.hpp"
 #include "pdftoolkit/parser/trailer.hpp"
 #include "scan_util.hpp"
 
@@ -45,6 +53,22 @@ constexpr std::uint32_t kMaxObjects = 10'000'000;
 // /Prev / /XRefStm chain depth cap (cycle insurance; the visited-list
 // check already breaks loops, this bounds memory on pathological files).
 constexpr std::size_t kMaxChainLinks = 4096;
+
+// Scratch arena for Flate-filtered xref stream rows: one 64 MiB virtual
+// allocation, created lazily on the first filtered section and shared by
+// the whole chain (rewound between sections — see the file header). The
+// size is the audit task-2.4 per-page budget; pages are touched only as
+// decompression writes them, so classic-only documents never pay for it.
+constexpr std::size_t kFlateScratchBytes = std::size_t{64} << 20;
+
+// Lazily created Flate support handed to the section parser. A null
+// `decompressor` means "this build has no codec" (offline profile) or
+// the caller wants the pre-2.4 degradation; the section parser treats
+// that exactly like any other unparseable stream.
+struct FlateSupport {
+    codec::FlateDecompressor* decompressor = nullptr;
+    std::optional<memory::BumpArena>* scratch = nullptr;
+};
 
 enum class SecResult { Ok, Corrupt };
 
@@ -237,12 +261,108 @@ SecResult parse_classic(const std::uint8_t* d, std::size_t size,
 }
 
 // ---------------------------------------------------------------------------
-// XRef stream (PDF 1.5+, unfiltered)
+// XRef stream (PDF 1.5+, unfiltered or FlateDecode)
 // ---------------------------------------------------------------------------
+
+// Decodes the variable-width rows of an xref stream from `rows` (either
+// the raw in-file bytes or the codec's decompressed staging buffer —
+// the audit's "feed the decompressor's output to the same row decoder",
+// P-017a). Owns the /Index defaulting, the hardening caps, the
+// row-availability bound and the /Length consistency check.
+SecResult decode_rows(const std::uint8_t* rows, std::size_t rows_avail,
+                      const std::vector<std::uint64_t>& w,
+                      const std::vector<std::uint64_t>& index_pairs_in,
+                      bool has_size, std::uint64_t size_n, bool has_length,
+                      std::uint64_t length, Builder& b) noexcept {
+    // Object numbering: /Index pairs (default [0 /Size]).
+    std::vector<std::uint64_t> index_pairs;
+    if (index_pairs_in.empty()) {
+        if (!has_size) {
+            return SecResult::Corrupt;
+        }
+        index_pairs.push_back(0);
+        index_pairs.push_back(size_n);
+    } else {
+        index_pairs = index_pairs_in;
+    }
+    if (index_pairs.size() % 2 != 0) {
+        return SecResult::Corrupt;
+    }
+    const std::uint64_t row = w[0] + w[1] + w[2];
+    std::uint64_t total = 0;
+    for (std::size_t i = 0; i + 1 < index_pairs.size(); i += 2) {
+        const std::uint64_t objnum0 = index_pairs[i];
+        const std::uint64_t cnt = index_pairs[i + 1];
+        if (objnum0 > kMaxObjects || cnt > rows_avail) {
+            return SecResult::Corrupt;
+        }
+        if (cnt > 0 && objnum0 + cnt - 1 > kMaxObjects) {
+            return SecResult::Corrupt;  // ids would pass the hardening cap
+        }
+        // Saturating total: an entry count can never exceed the bytes
+        // that encode it.
+        if (cnt > rows_avail - total) {
+            return SecResult::Corrupt;
+        }
+        total += cnt;
+    }
+    if (total > rows_avail / row) {
+        return SecResult::Corrupt;  // not enough row bytes for the entries
+    }
+    if (has_length && length < total * row) {
+        return SecResult::Corrupt;  // contradicts its own /Length
+    }
+
+    // Decode the variable-width rows.
+    std::size_t p = 0;
+    for (std::size_t i = 0; i + 1 < index_pairs.size(); i += 2) {
+        const std::uint64_t objnum0 = index_pairs[i];
+        const std::uint64_t cnt = index_pairs[i + 1];
+        for (std::uint64_t j = 0; j < cnt; ++j) {
+            std::uint64_t type = 1;  // w1 == 0: default type is "in use"
+            if (w[0] > 0) {
+                type = read_be(rows, p, w[0]);
+            }
+            p += static_cast<std::size_t>(w[0]);
+            std::uint64_t f2 = 0;
+            std::uint64_t f3 = 0;
+            if (w[1] > 0) {
+                f2 = read_be(rows, p, w[1]);
+            }
+            p += static_cast<std::size_t>(w[1]);
+            if (w[2] > 0) {
+                f3 = read_be(rows, p, w[2]);
+            }
+            p += static_cast<std::size_t>(w[2]);
+
+            XRefEntry e;
+            if (type == 0) {
+                e.kind = XRefEntry::Kind::Free;
+                e.offset = f2;
+                e.generation = static_cast<std::uint32_t>(f3);
+            } else if (type == 1) {
+                e.kind = XRefEntry::Kind::InUse;
+                e.offset = f2;
+                e.generation = static_cast<std::uint32_t>(f3);
+            } else if (type == 2) {
+                e.kind = XRefEntry::Kind::Compressed;
+                e.objstm_object = static_cast<std::uint32_t>(f2);
+                e.index_in_objstm = static_cast<std::uint32_t>(f3);
+            } else {
+                return SecResult::Corrupt;  // spec types are 0, 1, 2 only
+            }
+            if (!b.set(static_cast<std::uint32_t>(objnum0 + j), e)) {
+                return SecResult::Corrupt;
+            }
+        }
+    }
+    return SecResult::Ok;
+}
 
 SecResult parse_xref_stream(const std::uint8_t* d, std::size_t size,
                             std::size_t offset, Builder& b,
-                            ChainLink& link) noexcept {
+                            ChainLink& link,
+                            FlateSupport& flate) noexcept {
     // Indirect object header: `N G obj`
     std::size_t q = scan::skip_ws_and_comments(d, offset, size);
     std::uint32_t objnum = 0;
@@ -280,7 +400,17 @@ SecResult parse_xref_stream(const std::uint8_t* d, std::size_t size,
     bool has_size = false;
     bool has_length = false;
     bool type_bad = false;
+    // Filter classification: `flate_only` is the task-2.4 first-class
+    // path (exactly one filter: FlateDecode, spelled out or by its
+    // legacy /Fl abbreviation). `filtered` marks any other filter
+    // pipeline (non-Flate name, or several filters) — still honestly
+    // unparseable, the caller degrades as before 2.4.
     bool filtered = false;
+    bool flate_only = false;
+    // /DecodeParms: PNG (>10) / TIFF (2) predictors reshuffle the row
+    // bytes after inflation. Unsupported here — degrade rather than
+    // silently mis-decode rows (see the problem registry).
+    bool predictor_parms = false;
     scan::for_each_dict_entry(
         d, q + 2, close,
         [&](std::string_view key, std::size_t vp, std::size_t ve) {
@@ -298,13 +428,16 @@ SecResult parse_xref_stream(const std::uint8_t* d, std::size_t size,
                     has_size = true;
                 }
             } else if (key == "Length" && !has_length) {
-                std::size_t p = scan::skip_ws_and_comments(d, vp, ve);
-                if (scan::parse_u64(d, p, ve, length)) {
+                // A direct integer only: an indirect /Length (`4 0 R`)
+                // cannot be resolved before the index exists
+                // (chicken-and-egg). Pre-2.4 this half-parsed the
+                // object number as a byte bound (harmless for
+                // unfiltered rows, bounded by the file); for Flate
+                // streams that bogus value would be a compressed
+                // extent, so the reference form must be refused here.
+                if (parse_offset_value(d, vp, ve, length)) {
                     has_length = true;
                 }
-                // An indirect /Length (`4 0 R`) cannot be resolved before
-                // the index exists (chicken-and-egg): the byte-count
-                // bounds check below replaces it.
             } else if (key == "Type") {
                 std::size_t p = scan::skip_ws_and_comments(d, vp, ve);
                 if (p >= ve || d[p] != static_cast<std::uint8_t>('/')) {
@@ -317,28 +450,86 @@ SecResult parse_xref_stream(const std::uint8_t* d, std::size_t size,
                     }
                 }
             } else if (key == "Filter") {
-                // A name, or an array of names. Any non-empty filter
-                // means the stream bytes are not raw xref rows: Flate
-                // arrives with task 2.4 (P-017).
+                // A name, or an array of names. Exactly one FlateDecode
+                // filter takes the task-2.4 first-class path; any other
+                // non-empty pipeline stays honestly unparseable.
+                const auto is_flate_name = [](const std::uint8_t* base,
+                                              std::size_t pos,
+                                              std::size_t end) {
+                    // `pos` sits just past the '/'; FlateDecode or the
+                    // legacy abbreviation Fl.
+                    const std::size_t len = scan::name_length(base, pos, end);
+                    if (len == 11 &&
+                        std::memcmp(base + pos, "FlateDecode", 11) == 0) {
+                        return 1;
+                    }
+                    return len == 2 && std::memcmp(base + pos, "Fl", 2) == 0
+                               ? 1
+                               : 0;
+                };
                 std::size_t p = scan::skip_ws_and_comments(d, vp, ve);
                 if (p < ve && d[p] == static_cast<std::uint8_t>('[')) {
                     std::size_t a = p + 1;
+                    int flate_names = 0;
+                    int names = 0;
                     while (a < ve) {
                         a = scan::skip_ws_and_comments(d, a, ve);
                         if (a >= ve || d[a] == static_cast<std::uint8_t>(']')) {
                             break;
                         }
                         if (d[a] == static_cast<std::uint8_t>('/')) {
-                            if (scan::name_length(d, a + 1, ve) > 0) {
-                                filtered = true;
+                            const std::size_t len =
+                                scan::name_length(d, a + 1, ve);
+                            if (len > 0) {
+                                ++names;
+                                flate_names +=
+                                    is_flate_name(d, a + 1, ve) ? 1 : 0;
                             }
-                            a += 1 + scan::name_length(d, a + 1, ve);
+                            a += 1 + len;
                         } else {
                             ++a;
                         }
                     }
+                    if (names > 0) {
+                        filtered = true;
+                        flate_only = (names == 1 && flate_names == 1);
+                    }
                 } else if (p < ve && d[p] == static_cast<std::uint8_t>('/')) {
-                    filtered = scan::name_length(d, p + 1, ve) > 0;
+                    const std::size_t len = scan::name_length(d, p + 1, ve);
+                    if (len > 0) {
+                        filtered = true;
+                        flate_only = is_flate_name(d, p + 1, ve) != 0;
+                    }
+                }
+            } else if (key == "DecodeParms") {
+                // A dict (single filter) or an array (filter pipeline).
+                // Only a /Predictor >= 2 forces degradation; a null or
+                // absent predictor leaves the rows untouched.
+                std::size_t p = scan::skip_ws_and_comments(d, vp, ve);
+                if (p < ve && d[p] == static_cast<std::uint8_t>('[')) {
+                    predictor_parms = true;  // pipeline parms: unsupported
+                } else if (p < ve && d[p] == static_cast<std::uint8_t>('<') &&
+                           p + 1 < ve &&
+                           d[p + 1] == static_cast<std::uint8_t>('<')) {
+                    const std::size_t parm_close =
+                        scan::matching_dict_close(d, p, ve);
+                    if (parm_close != kNpos) {
+                        scan::for_each_dict_entry(
+                            d, p + 2, parm_close,
+                            [&](std::string_view pkey, std::size_t pvp,
+                                std::size_t pve) {
+                                if (pkey == "Predictor") {
+                                    std::size_t pp = scan::skip_ws_and_comments(
+                                        d, pvp, pve);
+                                    std::uint64_t predictor = 0;
+                                    if (scan::parse_u64(d, pp, pve,
+                                                        predictor) &&
+                                        predictor >= 2) {
+                                        predictor_parms = true;
+                                    }
+                                }
+                            });
+                    }
                 }
             } else if (key == "Prev" || key == "XRefStm") {
                 std::uint64_t value = 0;
@@ -357,10 +548,12 @@ SecResult parse_xref_stream(const std::uint8_t* d, std::size_t size,
     if (type_bad) {
         return SecResult::Corrupt;
     }
-    if (filtered) {
-        // Not corrupt in the strict sense — unparseable until task 2.4.
-        // The caller's newest-section rule routes this to the linear
-        // scan; older sections simply stop the chain.
+    if (filtered && !(flate_only && !predictor_parms)) {
+        // A filter pipeline this resolver does not decode (non-Flate
+        // filter, multi-filter pipeline, or predictor-bearing
+        // /DecodeParms). Not corrupt in the strict sense — the caller's
+        // newest-section rule routes this to the linear scan; older
+        // sections simply stop the chain.
         return SecResult::Corrupt;
     }
     if (w.size() != 3) {
@@ -393,85 +586,53 @@ SecResult parse_xref_stream(const std::uint8_t* d, std::size_t size,
         return SecResult::Corrupt;
     }
 
-    // Object numbering: /Index pairs (default [0 /Size]).
-    if (index_pairs.empty()) {
-        if (!has_size) {
+    if (flate_only) {
+        // ---- task-2.4 first-class path (P-017a) -------------------------
+        //
+        // The compressed extent must come from a DIRECT /Length: an
+        // indirect one cannot be resolved before the index exists, and
+        // searching for `endstream` inside arbitrary compressed bytes
+        // is not sound (the marker can occur in the payload). Without
+        // a trustworthy extent the section degrades exactly as before
+        // 2.4. The bomb defenses are the codec defaults (128x / 64 MiB;
+        // xref streams carry no uncompressed-size metadata).
+        if (!has_length) {
             return SecResult::Corrupt;
         }
-        index_pairs.push_back(0);
-        index_pairs.push_back(size_n);
-    }
-    if (index_pairs.size() % 2 != 0) {
-        return SecResult::Corrupt;
-    }
-    std::uint64_t total = 0;
-    for (std::size_t i = 0; i + 1 < index_pairs.size(); i += 2) {
-        const std::uint64_t objnum0 = index_pairs[i];
-        const std::uint64_t cnt = index_pairs[i + 1];
-        if (objnum0 > kMaxObjects || cnt > size) {
+        const std::size_t extent =
+            length < static_cast<std::uint64_t>(size - data_start)
+                ? static_cast<std::size_t>(length)
+                : size - data_start;
+        if (extent == 0) {
             return SecResult::Corrupt;
         }
-        if (cnt > 0 && objnum0 + cnt - 1 > kMaxObjects) {
-            return SecResult::Corrupt;  // ids would pass the hardening cap
+        if (flate.decompressor == nullptr || flate.scratch == nullptr) {
+            return SecResult::Corrupt;  // offline build: honest degradation
         }
-        // Saturating total: an entry count can never exceed the bytes
-        // that encode it.
-        if (cnt > size - total) {
+        if (!flate.scratch->has_value()) {
+            flate.scratch->emplace(kFlateScratchBytes);
+        }
+        memory::BumpArena& arena = **flate.scratch;
+        if (!arena.valid()) {
+            return SecResult::Corrupt;  // scratch allocation failed
+        }
+        const codec::FlateResult out = flate.decompressor->decompress(
+            std::span<const std::uint8_t>(d + data_start, extent), arena,
+            codec::FlateLimits{});
+        if (out.status != codec::FlateStatus::Ok) {
+            // Corrupt payload, bomb defense or exhausted scratch: the
+            // honest degradation handles all of them identically.
             return SecResult::Corrupt;
         }
-        total += cnt;
-    }
-    if (total > (size - data_start) / row) {
-        return SecResult::Corrupt;  // not enough stream bytes for the rows
-    }
-    if (has_length && length < total * row) {
-        return SecResult::Corrupt;  // contradicts its own /Length
+        // /Length is the COMPRESSED size here — no consistency check
+        // against the row count (rows_avail bound covers it).
+        return decode_rows(out.output.data(), out.output.size(), w,
+                           index_pairs, has_size, size_n, false, 0, b);
     }
 
-    // Decode the variable-width rows.
-    std::size_t p = data_start;
-    for (std::size_t i = 0; i + 1 < index_pairs.size(); i += 2) {
-        const std::uint64_t objnum0 = index_pairs[i];
-        const std::uint64_t cnt = index_pairs[i + 1];
-        for (std::uint64_t j = 0; j < cnt; ++j) {
-            std::uint64_t type = 1;  // w1 == 0: default type is "in use"
-            if (w[0] > 0) {
-                type = read_be(d, p, w[0]);
-            }
-            p += static_cast<std::size_t>(w[0]);
-            std::uint64_t f2 = 0;
-            std::uint64_t f3 = 0;
-            if (w[1] > 0) {
-                f2 = read_be(d, p, w[1]);
-            }
-            p += static_cast<std::size_t>(w[1]);
-            if (w[2] > 0) {
-                f3 = read_be(d, p, w[2]);
-            }
-            p += static_cast<std::size_t>(w[2]);
-
-            XRefEntry e;
-            if (type == 0) {
-                e.kind = XRefEntry::Kind::Free;
-                e.offset = f2;
-                e.generation = static_cast<std::uint32_t>(f3);
-            } else if (type == 1) {
-                e.kind = XRefEntry::Kind::InUse;
-                e.offset = f2;
-                e.generation = static_cast<std::uint32_t>(f3);
-            } else if (type == 2) {
-                e.kind = XRefEntry::Kind::Compressed;
-                e.objstm_object = static_cast<std::uint32_t>(f2);
-                e.index_in_objstm = static_cast<std::uint32_t>(f3);
-            } else {
-                return SecResult::Corrupt;  // spec types are 0, 1, 2 only
-            }
-            if (!b.set(static_cast<std::uint32_t>(objnum0 + j), e)) {
-                return SecResult::Corrupt;
-            }
-        }
-    }
-    return SecResult::Ok;
+    // ---- unfiltered rows: zero-copy, straight from the file ------------
+    return decode_rows(d + data_start, size - data_start, w, index_pairs,
+                       has_size, size_n, has_length, length, b);
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +687,18 @@ XRefIndex XRefIndex::from_document(std::span<const std::uint8_t> bytes,
     const std::uint8_t* d = bytes.data();
     const std::size_t size = bytes.size();
 
+    // Task 2.4: Flate support for /FlateDecode xref streams (P-017a).
+    // The decompressor and its scratch arena live for the whole chain
+    // walk; classic-only documents never construct the arena (it is
+    // emplaced lazily on the first filtered section).
+    codec::FlateDecompressor flate;
+    std::optional<memory::BumpArena> flate_scratch;
+    FlateSupport flate_ctx;
+    if (flate.supported()) {
+        flate_ctx.decompressor = &flate;
+        flate_ctx.scratch = &flate_scratch;
+    }
+
     Builder b;
     std::vector<std::uint64_t> visited;
     std::uint64_t at = info.xref_offset;
@@ -536,9 +709,19 @@ XRefIndex XRefIndex::from_document(std::span<const std::uint8_t> bytes,
         ChainLink link;
         const std::size_t probe = scan::skip_ws_and_comments(d, at, size);
         const bool classic = scan::keyword_at(d, probe, size, "xref");
+        // Decompressed rows are consumed into the Builder inside the
+        // section parse; rewinding the scratch between sections lets a
+        // multi-section Flate chain reuse the same pages (nothing
+        // observes the rewind — decode_rows has already returned).
+        const std::size_t scratch_mark =
+            flate_scratch ? flate_scratch->used_bytes() : 0;
         const SecResult r = classic
                                 ? parse_classic(d, size, at, b, link)
-                                : parse_xref_stream(d, size, at, b, link);
+                                : parse_xref_stream(d, size, at, b, link,
+                                                    flate_ctx);
+        if (flate_scratch) {
+            flate_scratch->rewind_to(scratch_mark);
+        }
         if (r != SecResult::Ok) {
             break;  // newest corrupt (-> linear scan) or older corrupt
                     // (-> stop the chain, newer entries stay)
@@ -554,9 +737,14 @@ XRefIndex XRefIndex::from_document(std::span<const std::uint8_t> bytes,
             visited.size() < kMaxChainLinks) {
             visited.push_back(link.xrefstm);
             ChainLink stream_link;
+            const std::size_t companion_mark =
+                flate_scratch ? flate_scratch->used_bytes() : 0;
             (void)parse_xref_stream(d, size, static_cast<std::size_t>(
                                                  link.xrefstm),
-                                    b, stream_link);
+                                    b, stream_link, flate_ctx);
+            if (flate_scratch) {
+                flate_scratch->rewind_to(companion_mark);
+            }
             // A failed companion stream leaves the classic section
             // standing — not a corruption of the chain.
         }
@@ -569,9 +757,10 @@ XRefIndex XRefIndex::from_document(std::span<const std::uint8_t> bytes,
 
     XRefIndex index;
     if (!any_ok) {
-        // The newest section is corrupt, unparseable (e.g. Flate-filtered
-        // xref stream, P-017) or points outside the file: rebuild by the
-        // emergency linear scan. The flag carries the reduced trust.
+        // The newest section is corrupt or unparseable (a filter
+        // pipeline this resolver cannot decode — predictors, non-Flate
+        // filters — or a Flate payload the codec rejected): rebuild by
+        // the emergency linear scan. The flag carries the reduced trust.
         Builder fresh;
         linear_scan(d, size, fresh);
         if (fresh.entries.empty()) {

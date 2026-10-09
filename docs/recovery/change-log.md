@@ -6,6 +6,78 @@ for end users.
 
 ---
 
+## 2026-10-09 — Session 4: issue-1/task-2.4 done (libdeflate Flate codec — Phase 2 complete)
+
+* **FlateDecompressor landed (audit task 2.4):**
+  `native/include/pdftoolkit/codec/flate.hpp` +
+  `native/src/codec/flate.cpp` — the audit's `src/codec/flate.cpp` slot
+  under the ADR-0002 path mapping. zlib-wrapper decompression (the PDF
+  /FlateDecode container, RFC 1950) via **libdeflate v1.26**; the
+  audit's "libdeflater" name does not exist as a C library (P-019) —
+  integration policy, offline escape hatch and pin discipline in
+  **ADR-0007** (first RUNTIME dependency of pdftoolkit_core; the
+  ADR-0005 option pattern applied: `PDTK_ENABLE_FLATE`, default ON;
+  OFF = honest stub returning `FlateStatus::Unavailable`, verified
+  offline with no `_deps`).
+* **Arena staging per the audit's step 3, enabled by a minimal
+  BumpArena extension:** `rewind_to(mark)` (speculative sub-allocation,
+  only-rewinds semantics, test-locked in pdtk_test_arena). The codec
+  speculates a chunk (8x compressed, or the caller's trusted metadata
+  hint), doubles on INSUFFICIENT_SPACE, and REWINDS between attempts —
+  consumption stays at the final chunk, never the sum. When a
+  speculative chunk exceeds the arena's remaining capacity the codec
+  retries with exactly that capacity before refusing.
+* **Bomb defenses exactly as prescribed (step 4):** expansion ratio
+  (default 128x), absolute output budget (default 64 MiB), and the
+  metadata size hint as a hard bound when present. A refused stream
+  leaves the arena exactly at its mark — no staging bytes survive a
+  refusal (contract change forced by the test suite, which caught dead
+  chunks on every refusal path).
+* **P-017a RESOLVED: Flate xref streams are first-class.**
+  `parse_xref_stream` now classifies `/Filter` (exactly one
+  FlateDecode — spelled out or legacy `/Fl` — is first-class; anything
+  else degrades), refuses indirect `/Length` (P-021 — the landed 2.2
+  code half-parsed `999 0 R` as the byte count 999; harmless for raw
+  rows, wrong as a compressed extent), decompresses into a lazily
+  created 64 MiB scratch arena (rewound section-to-section) and feeds
+  the SAME row decoder (`decode_rows`, extracted from the inline loop).
+  Predictor-bearing `/DecodeParms` deliberately degrade (P-020 — a
+  silently mis-decoded index is worse than a flagged scan).
+* **Two benchmark-driven codec fixes, measured:** (1) a 4x first guess
+  wasted one full aborted attempt on EVERY ~5x-ratio content stream
+  (measured 537-625 MB/s; efficiency ~55%) — 8x single-shots the
+  common 3-6x PDF ratios, lifting content throughput to ~1035-1089
+  MB/s; (2) the incompressible workload's 8x guess overshot the 32 MiB
+  benchmark arena with a 16 MiB output — the fit-to-arena retry. Both
+  documented in the recording.
+* **GATE MET (>= 800 MB/s/core):** content mix level 6 (the producer
+  default) 1034.7 MB/s mean, P50/P90/P99 1035.0/1039.7/1040.7, CV
+  1.6%; level 1/9 within 1036-1089 MB/s; repetitive 4511.5 MB/s;
+  incompressible 7533.0 MB/s; same-run control traversal 4538.4 MB/s
+  (content ratio ~23%). Recording:
+  `docs/benchmarks/2026-10-09-phase2-flate-baseline.md`.
+* **pdtk_bench_flate landed** (component-exists map — exists only when
+  `PDTK_HAVE_FLATE`: a stub must never produce numbers). Suite now five
+  binaries; the full pipeline run (CI-equivalent command) verified.
+* **Tests:** pdtk_test_flate 19 cases (round-trips 1 B-1 MiB, chunk
+  growth/reuse, every bomb defense, corrupt/truncated/gzip-container
+  mapping, arena integration, move semantics, 200 hostile buffers x2
+  determinism; the offline stub has its own case). test_xref grew to
+  23 cases + the corpus to **2,200 documents** (200 REAL
+  zlib-compressed Flate xref streams — verified first-class on default
+  builds; the same block degrades deterministically when the codec is
+  compiled out). test_arena +1 (rewind_to).
+* **Verification matrix (2026-10-09):** release zero-warning ctest
+  **12/12**, debug 12/12, asan+ubsan 11/11 (libdeflate instrumented
+  too), tsan 11/11, offline (`PDTK_ENABLE_FLATE=OFF` +
+  `PDTK_ENABLE_BENCHMARKS=OFF`) 12/12 with **no `_deps`**, Python 644.
+  All benchmarks 5/5 binaries through `scripts/run_perf.sh --json`.
+* **Phase 2 is complete** (2.1 trailer, 2.2 xref, 2.3 lexer, 2.4
+  Flate). Next per the registry: task-3.1 (CMap cache & Unicode
+  resolver — depends on 2.3+2.4, both done).
+
+---
+
 ## 2026-10-09 — Session 3 (cont.): issue-1/task-2.3 done (zero-copy lexer + bench_lexer)
 
 * **ZeroCopyLexer landed (audit task 2.3):**
