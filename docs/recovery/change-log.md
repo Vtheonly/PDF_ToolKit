@@ -72,6 +72,15 @@ for end users.
   too), tsan 11/11, offline (`PDTK_ENABLE_FLATE=OFF` +
   `PDTK_ENABLE_BENCHMARKS=OFF`) 12/12 with **no `_deps`**, Python 644.
   All benchmarks 5/5 binaries through `scripts/run_perf.sh --json`.
+* **P-022 — CI caught what the local matrix could not:** the first
+  push's native jobs failed on the clean runner (`libdeflate.h: No such
+  file or directory` in pdtk_test_xref) while every local check was
+  green — the reference sandbox carries a SYSTEM libdeflate 1.23-dev
+  whose `/usr/include` header silently satisfied the include, with
+  symbols still resolving from the pinned v1.26 archive (static-lib
+  PRIVATE propagation). Fixed by linking `libdeflate_static` to
+  pdtk_test_xref; registry entry documents the trap (any TU including
+  a FetchContent'd header must link that target explicitly).
 * **Phase 2 is complete** (2.1 trailer, 2.2 xref, 2.3 lexer, 2.4
   Flate). Next per the registry: task-3.1 (CMap cache & Unicode
   resolver — depends on 2.3+2.4, both done).

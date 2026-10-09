@@ -165,6 +165,14 @@ if(PDTK_BUILD_TESTS)
 
   add_executable(pdtk_test_xref tests/test_xref.cpp)
   target_link_libraries(pdtk_test_xref PRIVATE pdftoolkit_core pdtk_warnings)
+  if(PDTK_HAVE_FLATE)
+    # test_xref builds REAL zlib-wrapped Flate fixtures (make_flate_real)
+    # with libdeflate's compressor — it must use the SAME pinned headers
+    # as the codec. The reference sandbox carries a system libdeflate
+    # (1.23-dev in /usr/include) that silently satisfied the include and
+    # masked this missing link; the clean CI runner caught it (P-022).
+    target_link_libraries(pdtk_test_xref PRIVATE libdeflate_static)
+  endif()
 
   add_executable(pdtk_test_lexer tests/test_lexer.cpp)
   target_link_libraries(pdtk_test_lexer PRIVATE pdftoolkit_core pdtk_warnings)

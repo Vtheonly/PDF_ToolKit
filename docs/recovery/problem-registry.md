@@ -428,3 +428,33 @@ history — do not delete them.
   `docs/issues.md` / issue #1 to `libdeflate`.
 * **Status:** `open` (audit text amendment outstanding; integration
   done, test-locked).
+
+## P-022 — Reference sandbox carries a system libdeflate that masks missing third-party links (environment trap)
+
+* **Where:** the reference sandbox (`libdeflate-dev` 1.23-2 installed:
+  `/usr/include/libdeflate.h`); discovered by the task-2.4 CI run
+  37925672301 (all three native jobs failed at Build on the clean
+  ubuntu runner while the local matrix was green).
+* **What:** `pdtk_test_xref` includes `libdeflate.h` (its zlib fixture
+  helper) but was not linked to the `libdeflate_static` target.
+  Locally the include silently resolved from `/usr/include` (system
+  1.23 headers), and the symbols resolved from the FetchContent v1.26
+  archive via CMake's `$<LINK_ONLY>` propagation through
+  `pdftoolkit_core` — a version-mismatched header/library combination
+  that happened to be ABI-compatible, so every local check passed. The
+  clean CI runner has no system libdeflate and failed immediately.
+* **Why it matters:** a green LOCAL matrix does not prove hermetic
+  third-party isolation when the sandbox happens to carry the same
+  library system-wide. The clean-runner CI job is the actual
+  hermeticity check for this class of defect.
+* **What changed (2026-10-09):** `pdtk_test_xref` links
+  `libdeflate_static` under `PDTK_HAVE_FLATE` (pinned headers + same
+  archive); its ninja INCLUDES line now leads with the `_deps` source
+  dir. Rule for future work: any TU that includes a FetchContent'd
+  third-party header must link that third-party's target explicitly —
+  never rely on ambient system headers or transitive propagation.
+* **Verified:** local re-verification after the fix (release 12/12,
+  debug 12/12, asan 11/11, tsan 11/11, offline 12/12, Python 644) +
+  the follow-up CI run on the clean runner.
+* **Status:** `fixed` (regression-locked by CI itself; the trap is
+  documented here for the next third-party integration).
