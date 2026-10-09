@@ -20,12 +20,13 @@
 //     `N G obj` headers (flagged via XRefIndex::from_linear_scan()).
 //
 // All parsing is zero-copy position arithmetic over the caller's buffer
-// (scan_util.hpp primitives, shared with trailer.cpp since this task);
-// the single exception is Flate-filtered xref streams, whose rows are
-// staged in a lazily created scratch BumpArena (audit task 2.4 step 3)
-// and rewound section-to-section — the rows are consumed into the
-// Builder before the section parse returns, so nothing survives to
-// observe the rewind.
+// (scan_util.hpp primitives, shared with trailer.cpp since this task;
+// stream_util.hpp stream-object anatomy, shared with the font/ CMap
+// parser since task 3.1); the single exception is Flate-filtered xref
+// streams, whose rows are staged in a lazily created scratch BumpArena
+// (audit task 2.4 step 3) and rewound section-to-section — the rows are
+// consumed into the Builder before the section parse returns, so
+// nothing survives to observe the rewind.
 
 #include "pdftoolkit/parser/xref.hpp"
 
@@ -36,12 +37,20 @@
 #include "pdftoolkit/codec/flate.hpp"
 #include "pdftoolkit/parser/trailer.hpp"
 #include "scan_util.hpp"
+#include "stream_util.hpp"
 
 namespace pdftoolkit::parser {
 namespace {
 
 using scan::kNpos;
 using scan::is_regular;
+// stream_util primitives (extracted from this file in task 3.1 —
+// the CMap cache needed the identical anatomy; extend, never fork).
+using stream::FilterClass;
+using stream::classify_filter;
+using stream::locate_stream_data;
+using stream::parms_demand_predictor;
+using stream::parse_direct_integer;
 
 // Hardening cap: the contiguous table is indexed by object id, so a
 // hostile subsection header or /Index pair claiming id ~2^32 would
@@ -132,26 +141,11 @@ std::uint64_t read_be(const std::uint8_t* d, std::size_t pos,
 
 // Parses a dictionary VALUE that must be a plain offset integer,
 // rejecting indirect references (`4 0 R`) — used for /Prev and
-// /XRefStm. Returns true and sets `value` on success.
+// /XRefStm. Thin alias over the shared stream_util primitive (the
+// /Length chicken-and-egg rule, P-021, lives there since task 3.1).
 bool parse_offset_value(const std::uint8_t* d, std::size_t vp,
                          std::size_t ve, std::uint64_t& value) noexcept {
-    std::size_t q = scan::skip_ws_and_comments(d, vp, ve);
-    if (!scan::parse_u64(d, q, ve, value)) {
-        return false;
-    }
-    // `4 0 R` (broken files) is a reference, not an offset: reject.
-    std::size_t s = scan::skip_ws_and_comments(d, q, ve);
-    std::size_t probe = s;
-    std::uint32_t dummy = 0;
-    if (s < ve && scan::is_digit(d[s]) &&
-        scan::parse_u32(d, probe, ve, dummy)) {
-        std::size_t t = scan::skip_ws_and_comments(d, probe, ve);
-        if (t < ve && d[t] == static_cast<std::uint8_t>('R') &&
-            (t + 1 >= ve || !is_regular(d[t + 1]))) {
-            return false;
-        }
-    }
-    return true;
+    return stream::parse_direct_integer(d, vp, ve, value);
 }
 
 // Extracts /Prev and /XRefStm from a dictionary BODY (positions are
@@ -363,25 +357,12 @@ SecResult parse_xref_stream(const std::uint8_t* d, std::size_t size,
                             std::size_t offset, Builder& b,
                             ChainLink& link,
                             FlateSupport& flate) noexcept {
-    // Indirect object header: `N G obj`
-    std::size_t q = scan::skip_ws_and_comments(d, offset, size);
-    std::uint32_t objnum = 0;
-    std::uint32_t gen = 0;
-    if (!scan::parse_u32(d, q, size, objnum)) {
+    // Indirect object header: `N G obj` (shared stream_util anatomy).
+    std::size_t q = stream::parse_indirect_header(d, size, offset);
+    if (q == kNpos) {
         return SecResult::Corrupt;
     }
-    std::size_t r = scan::skip_ws_and_comments(d, q, size);
-    if (r == q) {
-        return SecResult::Corrupt;
-    }
-    if (!scan::parse_u32(d, r, size, gen)) {
-        return SecResult::Corrupt;
-    }
-    q = scan::skip_ws_and_comments(d, r, size);
-    if (q == r || !scan::keyword_at(d, q, size, "obj")) {
-        return SecResult::Corrupt;
-    }
-    q = scan::skip_ws_and_comments(d, q + 3, size);
+    q = scan::skip_ws_and_comments(d, q, size);
 
     // Stream dictionary.
     if (q + 1 >= size || d[q] != static_cast<std::uint8_t>('<') ||
@@ -452,85 +433,16 @@ SecResult parse_xref_stream(const std::uint8_t* d, std::size_t size,
             } else if (key == "Filter") {
                 // A name, or an array of names. Exactly one FlateDecode
                 // filter takes the task-2.4 first-class path; any other
-                // non-empty pipeline stays honestly unparseable.
-                const auto is_flate_name = [](const std::uint8_t* base,
-                                              std::size_t pos,
-                                              std::size_t end) {
-                    // `pos` sits just past the '/'; FlateDecode or the
-                    // legacy abbreviation Fl.
-                    const std::size_t len = scan::name_length(base, pos, end);
-                    if (len == 11 &&
-                        std::memcmp(base + pos, "FlateDecode", 11) == 0) {
-                        return 1;
-                    }
-                    return len == 2 && std::memcmp(base + pos, "Fl", 2) == 0
-                               ? 1
-                               : 0;
-                };
-                std::size_t p = scan::skip_ws_and_comments(d, vp, ve);
-                if (p < ve && d[p] == static_cast<std::uint8_t>('[')) {
-                    std::size_t a = p + 1;
-                    int flate_names = 0;
-                    int names = 0;
-                    while (a < ve) {
-                        a = scan::skip_ws_and_comments(d, a, ve);
-                        if (a >= ve || d[a] == static_cast<std::uint8_t>(']')) {
-                            break;
-                        }
-                        if (d[a] == static_cast<std::uint8_t>('/')) {
-                            const std::size_t len =
-                                scan::name_length(d, a + 1, ve);
-                            if (len > 0) {
-                                ++names;
-                                flate_names +=
-                                    is_flate_name(d, a + 1, ve) ? 1 : 0;
-                            }
-                            a += 1 + len;
-                        } else {
-                            ++a;
-                        }
-                    }
-                    if (names > 0) {
-                        filtered = true;
-                        flate_only = (names == 1 && flate_names == 1);
-                    }
-                } else if (p < ve && d[p] == static_cast<std::uint8_t>('/')) {
-                    const std::size_t len = scan::name_length(d, p + 1, ve);
-                    if (len > 0) {
-                        filtered = true;
-                        flate_only = is_flate_name(d, p + 1, ve) != 0;
-                    }
-                }
+                // non-empty pipeline stays honestly unparseable
+                // (shared classification — stream_util since task 3.1).
+                const FilterClass fc = classify_filter(d, vp, ve);
+                filtered = fc.has_filter;
+                flate_only = fc.flate_only;
             } else if (key == "DecodeParms") {
-                // A dict (single filter) or an array (filter pipeline).
-                // Only a /Predictor >= 2 forces degradation; a null or
-                // absent predictor leaves the rows untouched.
-                std::size_t p = scan::skip_ws_and_comments(d, vp, ve);
-                if (p < ve && d[p] == static_cast<std::uint8_t>('[')) {
-                    predictor_parms = true;  // pipeline parms: unsupported
-                } else if (p < ve && d[p] == static_cast<std::uint8_t>('<') &&
-                           p + 1 < ve &&
-                           d[p + 1] == static_cast<std::uint8_t>('<')) {
-                    const std::size_t parm_close =
-                        scan::matching_dict_close(d, p, ve);
-                    if (parm_close != kNpos) {
-                        scan::for_each_dict_entry(
-                            d, p + 2, parm_close,
-                            [&](std::string_view pkey, std::size_t pvp,
-                                std::size_t pve) {
-                                if (pkey == "Predictor") {
-                                    std::size_t pp = scan::skip_ws_and_comments(
-                                        d, pvp, pve);
-                                    std::uint64_t predictor = 0;
-                                    if (scan::parse_u64(d, pp, pve,
-                                                        predictor) &&
-                                        predictor >= 2) {
-                                        predictor_parms = true;
-                                    }
-                                }
-                            });
-                    }
-                }
+                // Only a /Predictor >= 2 (or an array-form pipeline)
+                // forces degradation; a null or absent predictor leaves
+                // the rows untouched (shared rule — stream_util, P-020).
+                predictor_parms = parms_demand_predictor(d, vp, ve);
             } else if (key == "Prev" || key == "XRefStm") {
                 std::uint64_t value = 0;
                 if (parse_offset_value(d, vp, ve, value)) {
@@ -569,20 +481,10 @@ SecResult parse_xref_stream(const std::uint8_t* d, std::size_t size,
         return SecResult::Corrupt;
     }
 
-    // Stream data: after `stream` exactly one EOL (\r\n | \n | \r).
-    q = scan::skip_ws_and_comments(d, close + 2, size);
-    if (!scan::keyword_at(d, q, size, "stream")) {
-        return SecResult::Corrupt;
-    }
-    q += 6;
-    if (q < size && d[q] == static_cast<std::uint8_t>('\r')) {
-        ++q;
-    }
-    if (q < size && d[q] == static_cast<std::uint8_t>('\n')) {
-        ++q;
-    }
-    const std::size_t data_start = q;
-    if (data_start > size) {
+    // Stream data: after `stream` exactly one EOL (\r\n | \n | \r)
+    // — shared rule, stream_util since task 3.1.
+    const std::size_t data_start = locate_stream_data(d, size, close + 2);
+    if (data_start == kNpos) {
         return SecResult::Corrupt;
     }
 

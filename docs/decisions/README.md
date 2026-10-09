@@ -6,7 +6,7 @@ considered, Consequences.
 
 Rules:
 
-* Numbering: `adr-NNNN-slug.md`, monotonically increasing (0001–0007 exist).
+* Numbering: `adr-NNNN-slug.md`, monotonically increasing (0001–0008 exist).
 * An ADR is never edited to reverse itself — a new ADR supersedes it and
   both remain (status field flips to `superseded by ADR-NNNN`).
 * Every ADR must be linked from the relevant code location's documentation
@@ -23,3 +23,4 @@ Rules:
 | [0005](adr-0005-benchmark-pipeline-policy.md) | Benchmark pipeline policy (FetchContent pin, single-invocation rule, recording ledger) | accepted |
 | [0006](adr-0006-guarded-mmap-sigbus-design.md) | Guarded SIGBUS recovery for MmapHandle (sigsetjmp/siglongjmp, not throw-from-handler) | accepted |
 | [0007](adr-0007-libdeflate-integration-policy.md) | libdeflate as the Flate engine, fetched behind `PDTK_ENABLE_FLATE` (ADR-0005 pattern for a runtime dep) | accepted |
+| [0008](adr-0008-xxhash64-in-repo.md) | xxHash64 implemented in-repo (internal header, reference-vector pinned; no third fetchable dependency) | accepted |

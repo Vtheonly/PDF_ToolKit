@@ -6,6 +6,58 @@ for end users.
 
 ---
 
+## 2026-10-10 — Session 5: issue-1/task-3.1 done (CMap cache & Unicode resolver — Phase 3 opened)
+
+* **CMapTable + CMapCache landed (audit task 3.1):**
+  `native/include/pdftoolkit/font/cmap.hpp` +
+  `native/src/font/cmap.cpp`. Lexer-driven /ToUnicode parse (bfchar,
+  both bfrange forms, codespace), UTF-16BE destinations with surrogate
+  pairs, build-time ligature expansion (verified table — P-024 scope
+  line), positional-pair malformed-entry alignment, hostile-range
+  refusal, O(1) frozen direct-index tables, xxHash64 payload dedup
+  with byte-exact confirmation, owned Flate codec + rewound scratch
+  arena. Evidence: task-registry 3.1 row; pdtk_test_cmap 34 cases;
+  recording `docs/benchmarks/2026-10-10-phase3-cmap-baseline.md`
+  (lookup 700.6 M/s = 1.43 ns; intern hit 938.6 k/s vs miss 59.4 k/s).
+* **xxHash64 implemented in-repo (ADR-0008):**
+  `native/src/core/xxhash64.hpp` — streaming + one-shot, internal
+  header. Reference vectors generated from the canonical C library
+  (Python `xxhash` wheel) and embedded in test_cmap.cpp; the vectors
+  CAUGHT A REAL SPEC MISREADING during development: the XXH64 stripe
+  is four 8-byte lanes (acc1<-[0..8) .. acc4<-[24..32)), not XXH32's
+  eight 4-byte lanes round-robin — short inputs (< 32 B) passed while
+  every striped input hashed wrong. Known-answer tests are how spec
+  algorithms land here, not eyeballing.
+* **stream_util.hpp extracted from xref.cpp (extend-not-fork):** the
+  shared stream-object anatomy (`N G obj` header, direct-integer
+  /Length refusal P-021, /Filter classification incl. /Fl,
+  /DecodeParms predictor detection P-020, `stream`+EOL payload
+  location) now lives in `native/src/parser/stream_util.hpp`; xref.cpp
+  calls the same primitives (its 23-case suite + 2,200-doc corpus
+  re-verified after the refactor — the same extraction discipline that
+  caught 2 walker bugs in task 2.2).
+* **Three implementation bugs the test-drive caught before ship:**
+  (1) the block-parser token loop was missing its update clause (first
+  token processed forever — caught as a hang); (2) UTF-16BE units
+  were built from 2 hex digits instead of 4 (every destination decoded
+  as doubled garbage codepoints); (3) a malformed bfchar SOURCE did
+  not consume its positional destination, cascading misalignment that
+  manufactured wrong mappings from corrupt input — pairs/triples now
+  die whole. Plus a bfrange array-cursor initialization bug (bound
+  destroyed by `lo - 1`).
+* **P-023 filed (planning defect):** the audit never assigns the
+  object-graph resolver (following /Font /ToUnicode N 0 R through
+  references and /ObjStm) to any task; task 3.1's
+  `intern_stream_object(full object bytes)` is the seam a future
+  resolver plugs into.
+* **Matrix after the change:** release 13/13 zero-warning (ctest grew
+  from 12), debug 13/13, asan+ubsan 12/12, tsan 12/12 (validates the
+  cache mutex), offline 13/13 (no _deps), Python 644. Benchmark suite
+  is now 6 binaries (pdtk_bench_cmap added; CI's benchmark step picks
+  it up via run_perf.sh auto-discovery).
+
+---
+
 ## 2026-10-09 — Session 4: issue-1/task-2.4 done (libdeflate Flate codec — Phase 2 complete)
 
 * **FlateDecompressor landed (audit task 2.4):**

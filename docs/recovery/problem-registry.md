@@ -458,3 +458,58 @@ history — do not delete them.
   the follow-up CI run on the clean runner.
 * **Status:** `fixed` (regression-locked by CI itself; the trap is
   documented here for the next third-party integration).
+
+## P-023 — The audit never assigns the object-graph resolver to any task (planning defect)
+
+* **Where:** `docs/issues.md` (issue #1), Phase 3+ task texts.
+* **What:** tasks 3.1/3.2/3.3 consume streams whose ACQUISITION path is
+  specified nowhere: reaching a font's `/ToUnicode` program requires
+  following `/Font` -> `/ToUnicode N 0 R` through indirect references,
+  the page tree, and object streams (type-2 xref entries) — an
+  object-graph resolver that no task in the audit's phase list builds.
+  Task 2.2 produces the XRefIndex (where every object LIVES), and task
+  3.1's registry entry already anticipated composing with it, but the
+  reference-following layer itself (parse an indirect reference value,
+  load a compressed object out of an /ObjStm) has no home. Same
+  planning-defect class as P-012/P-017a: the dependency is real but
+  unlisted.
+* **Interim contract (implemented with task 3.1):**
+  `CMapCache::intern_stream_object` takes the FULL stream-object bytes
+  starting at the object header — given an XRefIndex entry, that is
+  the object's file offset; the resolver-to-be only needs to hand over
+  spans. When a future task builds the graph, this boundary is the
+  seam it plugs into.
+* **Resolution path:** a task (natural home: Phase 3 alongside 3.3's
+  page ingestion, or a dedicated small task before it) implements the
+  reference/value layer — indirect reference parsing, /ObjStm
+  extraction (needs 2.4's codec, already landed), page-tree descent —
+  and wires `CMapTable` lookups behind it.
+* **Action for the audit owner:** add the missing task (or extend
+  3.2/3.3's steps) in `docs/issues.md` / issue #1.
+* **Status:** `open` (planning defect documented; consumer-side seam
+  in place).
+
+## P-024 — Ligature normalization covers Alphabetic Presentation Forms only; Arabic presentation forms and Unicode normalization are out of scope (deliberate scope line)
+
+* **Where:** `native/src/font/cmap.cpp` (the verified ligature table).
+* **What:** the audit's task-3.1 step 3 says "Normalize multi-character
+  ligatures: Expand 0xFB01 to {'f', 'i'}" — one example, no boundary.
+  The implemented boundary: every codepoint in U+FB00..U+FB4F whose
+  Unicode name is a LIGATURE with a multi-character decomposition
+  (14 entries: Latin ff/fi/fl/ffi/ffl/ſt/st, Armenian men-*/vew-now,
+  Hebrew yiddish-double-yod-patah and alef-lamed), each verified
+  against Python's `unicodedata`. Deliberately EXCLUDED: the Hebrew
+  base+diacritic compositions in the same block (FB1D, FB2A..FB4E —
+  accent compositions, not ligatures) and Arabic Presentation Forms
+  (U+FB50+ — contextual joining forms whose expansion changes shaping
+  semantics, and which text extractors do not expand).
+* **Why it is deliberate:** expanding accent compositions would be
+  Unicode NORMALIZATION (a different feature with different
+  correctness rules — NFC/NFKC territory), and expanding Arabic
+  contextual forms would corrupt text that shaping engines need
+  intact. The audit asks for ligature repair, not normalization.
+* **Resolution path:** if normalization is ever wanted, it is a
+  separate, explicitly-scoped feature (probably at text-extraction
+  time, not CMap-build time), with its own ADR.
+* **Status:** `open` (documented scope line; table is test-locked by
+  `ligature_table_is_complete`).

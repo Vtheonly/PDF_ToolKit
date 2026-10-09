@@ -52,6 +52,7 @@ lives at the top of `native/benchmarks/CMakeLists.txt`.
 
 | Date | File | Scope |
 |------|------|-------|
+| 2026-10-10 | [2026-10-10-phase3-cmap-baseline.md](2026-10-10-phase3-cmap-baseline.md) | CMap resolver (task 3.1; no gate — 3.3 baseline: lookup 1.43 ns, intern hit/miss 16x, parse code-density analysis) |
 | 2026-10-09 | [2026-10-09-phase2-flate-baseline.md](2026-10-09-phase2-flate-baseline.md) | FlateDecompressor (task 2.4; gate MET 1034.7 MB/s content mean, staging-heuristic analysis) |
 | 2026-10-09 | [2026-10-09-phase2-lexer-baseline.md](2026-10-09-phase2-lexer-baseline.md) | ZeroCopyLexer (task 2.3; gate P-018 analysis, same-run control) |
 | 2026-10-09 | [2026-10-09-phase1-slab-baseline.md](2026-10-09-phase1-slab-baseline.md) | PageSlab extraction/build (task 1.3) |

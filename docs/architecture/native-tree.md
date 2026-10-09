@@ -48,7 +48,7 @@ native/
 │   │   └── page_slab.cpp       slab builder (32-B-aligned sections, CRC-32) +
 │   │                           view validation (structure; crc pins bytes)
 │   ├── parser/
-│   │   ├── scan_util.hpp       INTERNAL shared primitives: char classes,
+│   │   ├── scan_util.hpp · stream_util.hpp (3.1) · core/xxhash64.hpp (3.1, ADR-0008)       INTERNAL shared primitives: char classes,
 │   │   │                       string/array/dict skippers, skip_value,
 │   │   │                       for_each_dict_entry (2.1+2.2 reuse; 2.3 seed)
 │   │   ├── trailer.cpp         backward AVX2 (runtime-dispatched) + scalar
@@ -175,7 +175,7 @@ native/include/pdftoolkit/
 ├── memory/   mmap.hpp (1.1 done) · arena.hpp (1.2 done) · page_slab.hpp (1.3 done)
 ├── parser/   trailer.hpp (2.1 done) · xref.hpp (2.2 done) · lexer.hpp (2.3 done)
 ├── codec/    flate.hpp (2.4 done)
-├── font/     cmap.hpp (3.1)
+├── font/     cmap.hpp (3.1 done)
 ├── layout/   evaluator.hpp (3.2) · materializer.hpp (3.3)
 ├── index/    inverted.hpp (4.1)
 ├── search/   wand.hpp (4.2) · simd.hpp (4.3)

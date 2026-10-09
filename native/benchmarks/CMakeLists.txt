@@ -13,6 +13,7 @@
 #   task 2.4 (Flate codec)    -> pdtk_bench_flate   (lands with task 2.4;
 #                              exists only when PDTK_HAVE_FLATE - the stub
 #                              measures nothing)
+#   task 3.1 (CMap resolver)  -> pdtk_bench_cmap    (lands with task 3.1)
 #   task 4.2 (BlockMaxWand)   -> pdtk_bench_wand    (lands with task 4.2)
 
 # Every benchmark links pdftoolkit_core (reuse: no parallel implementation
@@ -62,4 +63,14 @@ if(PDTK_HAVE_FLATE)
   if(TARGET pdtk_native_arch)
     target_link_libraries(pdtk_bench_flate PRIVATE pdtk_native_arch)
   endif()
+endif()
+
+# task 3.1 (CMap cache & Unicode resolver) -> pdtk_bench_cmap
+# (component-exists rule above; measures parse/lookup/intern — the
+# Flate path is pdtk_bench_flate's subject, so no libdeflate here).
+add_executable(pdtk_bench_cmap bench_cmap.cpp)
+target_link_libraries(pdtk_bench_cmap
+  PRIVATE pdftoolkit_core benchmark::benchmark pdtk_warnings)
+if(TARGET pdtk_native_arch)
+  target_link_libraries(pdtk_bench_cmap PRIVATE pdtk_native_arch)
 endif()

@@ -186,3 +186,24 @@ entry resolved with a pointer.
   4.50–4.78 GB/s (~1.7×). Always re-measure the control in the SAME run
   as the gated component (the lexer baseline does exactly this); never
   ratio a component against a control from an earlier session.
+
+## U-014 — "Standardized glyph-test document" acceptance interpreted as a deterministic synthetic corpus
+
+* **Question:** the audit's task-3.1 acceptance says "Accurate decoding
+  of complex CID-keyed and TrueType subset fonts verified against a
+  standardized glyph-test document." No such standardized document
+  exists in the repository (no binary fixtures by policy, AGENTS.md
+  §4.8), and the audit names none. What satisfies the criterion?
+* **Assumption (current):** the same approach as U-013 — a
+  deterministic generator IS the glyph-test document: 500 synthetic
+  font ToUnicode programs (CID-keyed with contiguous + array bfranges,
+  surrogate-pair and ligature targets; TrueType subsets with sparse
+  bfchars), each with a coded probe string and its exact expected
+  UTF-32 computed independently by the generator, decoded through the
+  production intern path (`acceptance_glyph_test_corpus`). Known gap:
+  the generator only contains font shapes the generator thought of.
+* **How to resolve:** when a real glyph-test corpus becomes available
+  (Adobe's CMap test files, the pdf.js font suite, or a
+  PyMuPDF-differential over real PDFs), run the decode comparison and
+  record it; until then the synthetic corpus is the honest,
+  reproducible evidence.

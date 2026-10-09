@@ -140,7 +140,12 @@ zero-copy lexer (task 2.3: the audit's PdfToken stream, branchless
 whitespace LUT, 67.7 M tokens/s measured) and the hardware-accelerated
 Flate decompressor (task 2.4: libdeflate v1.26 staged in the
 thread-local arena, decompression-bomb defenses, **1034.7 MB/s
-content-mix mean vs the audit's 800 MB/s/core gate**).
+content-mix mean vs the audit's 800 MB/s/core gate**); Phase 3 OPENED
+— the immutable CMap cache & Unicode resolver (task 3.1: /ToUnicode
+parsing over the lexer, UTF-16BE + surrogate pairs, build-time
+ligature expansion, xxHash64 content dedup, Flate-compressed CMaps
+first-class; 500-document glyph-test acceptance, **1.43 ns/code
+lookup**).
 
 ```bash
 cmake --preset release -DPython3_EXECUTABLE=$(which python)  # needs cmake+ninja
