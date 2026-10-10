@@ -14,6 +14,11 @@
 #                              exists only when PDTK_HAVE_FLATE - the stub
 #                              measures nothing)
 #   task 3.1 (CMap resolver)  -> pdtk_bench_cmap    (lands with task 3.1)
+#   task 3.2 (operator state
+#                 machine)    -> pdtk_bench_evaluator (lands with task 3.2;
+#                              precision gate is the test suite's golden
+#                              vectors — this measures the per-stream cost
+#                              3.3 builds on)
 #   task 4.2 (BlockMaxWand)   -> pdtk_bench_wand    (lands with task 4.2)
 
 # Every benchmark links pdftoolkit_core (reuse: no parallel implementation
@@ -73,4 +78,15 @@ target_link_libraries(pdtk_bench_cmap
   PRIVATE pdftoolkit_core benchmark::benchmark pdtk_warnings)
 if(TARGET pdtk_native_arch)
   target_link_libraries(pdtk_bench_cmap PRIVATE pdtk_native_arch)
+endif()
+
+# task 3.2 (operator state machine) -> pdtk_bench_evaluator
+# (component-exists rule above; no gate on this task — the benchmark
+# gives task 3.3 its front-half baseline and reports the U-012
+# same-run traversal control).
+add_executable(pdtk_bench_evaluator bench_evaluator.cpp)
+target_link_libraries(pdtk_bench_evaluator
+  PRIVATE pdftoolkit_core benchmark::benchmark pdtk_warnings)
+if(TARGET pdtk_native_arch)
+  target_link_libraries(pdtk_bench_evaluator PRIVATE pdtk_native_arch)
 endif()

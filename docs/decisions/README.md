@@ -24,3 +24,4 @@ Rules:
 | [0006](adr-0006-guarded-mmap-sigbus-design.md) | Guarded SIGBUS recovery for MmapHandle (sigsetjmp/siglongjmp, not throw-from-handler) | accepted |
 | [0007](adr-0007-libdeflate-integration-policy.md) | libdeflate as the Flate engine, fetched behind `PDTK_ENABLE_FLATE` (ADR-0005 pattern for a runtime dep) | accepted |
 | [0008](adr-0008-xxhash64-in-repo.md) | xxHash64 implemented in-repo (internal header, reference-vector pinned; no third fetchable dependency) | accepted |
+| [0009](adr-0009-evaluator-precision-model.md) | Evaluator exposes float32 Mat6, carries double internally (f32 accumulation measured past the +/-0.001 pt gate: 1.309e-03 pt / 400 glyphs) | accepted |

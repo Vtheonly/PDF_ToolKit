@@ -1,11 +1,12 @@
 # Native Engine — Target Tree & Coexistence Model (issue #1)
 
-Status: **Phase 0 + Phase 1 landed (tasks 0.1–0.3, 1.1–1.3 done); Phase 2
-three-quarters landed (tasks 2.1, 2.2, 2.3 done; 2.4 remaining)**. The Python engine remains the authoritative
+Status: **Phase 0 + Phase 1 + Phase 2 landed (tasks 0.1–0.3, 1.1–1.3,
+2.1–2.4 done); Phase 3 in progress (tasks 3.1, 3.2 done; 3.3
+remaining)**. The Python engine remains the authoritative
 implementation until the native core reaches parity and the audit's
 performance gates pass (AGENTS.md §5.6).
 
-## What exists today (verified 2026-10-09)
+## What exists today (verified 2026-10-10)
 
 ```
 native/
@@ -39,6 +40,16 @@ native/
 │                               (task 2.4 done — libdeflate v1.26 behind
 │                               PDTK_ENABLE_FLATE, ADR-0007; PIMPL'd, no
 │                               third-party types in the public API)
+│   └── font/
+│       └── cmap.hpp            CMapTable + CMapCache (task 3.1 done — frozen
+│                               O(1) direct-index tables, UTF-16BE + surrogate
+│                               pairs, build-time ligature expansion; xxHash64
+│                               payload dedup, ADR-0008)
+│   └── layout/
+│       └── evaluator.hpp       Mat6 + OperatorEvaluator + GlyphSink (task 3.2
+│                               done — push-down operator state machine;
+│                               FontMetricsResolver is the P-023 seam; float32
+│                               API over a double carry, ADR-0009)
 ├── src/
 │   ├── core/{version,errors}.cpp
 │   ├── memory/
@@ -48,9 +59,11 @@ native/
 │   │   └── page_slab.cpp       slab builder (32-B-aligned sections, CRC-32) +
 │   │                           view validation (structure; crc pins bytes)
 │   ├── parser/
-│   │   ├── scan_util.hpp · stream_util.hpp (3.1) · core/xxhash64.hpp (3.1, ADR-0008)       INTERNAL shared primitives: char classes,
+│   │   ├── scan_util.hpp · stream_util.hpp · core/xxhash64.hpp (ADR-0008)   INTERNAL shared primitives: char classes,
 │   │   │                       string/array/dict skippers, skip_value,
-│   │   │                       for_each_dict_entry (2.1+2.2 reuse; 2.3 seed)
+│   │   │                       for_each_dict_entry (2.1+2.2 reuse; 2.3 seed;
+│   │   │                       stream anatomy extracted for 3.1; xxHash64
+│   │   │                       in-repo for 3.1/3.3/4.1)
 │   │   ├── trailer.cpp         backward AVX2 (runtime-dispatched) + scalar
 │   │   │                       needle search; tolerant offset parse;
 │   │   │                       string/nesting-aware trailer dict extraction
@@ -69,6 +82,18 @@ native/
 │                               chunks (8x guess, rewind-retry, fit-to-arena);
 │                               bomb defenses 128x / 64 MiB / hint; offline
 │                               stub returns Unavailable
+│   ├── font/
+│   │   └── cmap.cpp            /ToUnicode parse over the lexer; ligature table;
+│   │                           CMapCache intern (xxHash64 + byte-exact hit
+│   │                           confirmation, owned codec + rewound scratch)
+│   └── layout/
+│       └── evaluator.cpp       operator dispatch (Tc..Ts, BT/ET, Td/TD/Tm/T*,
+│                               Tj/'/"/TJ, q/Q/cm); double-carry displacement
+│                               with Tm = T_tx(D) x Tlm; per-glyph 14-flop Trm;
+│                               TJ arrays recorded as byte ranges and replayed
+│                               only for TJ; dict/array member keywords never
+│                               dispatch; escape/hex decode fused with code
+│                               assembly (zero heap, noexcept)
 │   ├── ffi/pdftoolkit.cpp      EngineHandle + C-ABI implementations;
 │   │                           register_document mmaps via MmapHandle (task 1.1)
 │   ├── python/pdftoolkit_native.cpp  raw C-API extension module
@@ -78,9 +103,12 @@ native/
 │   ├── bench_mmap.cpp            at the top of benchmarks/CMakeLists.txt)
 │   ├── bench_slab.cpp
 │   ├── bench_lexer.cpp         + same-run traversal control (U-012 method)
-│   └── bench_flate.cpp         output-MB/s over content/repetitive/
-                                incompressible workloads + control (2.4;
-                                exists only when PDTK_HAVE_FLATE)
+│   ├── bench_flate.cpp         output-MB/s over content/repetitive/
+│   │                           incompressible workloads + control (2.4;
+│   │                           exists only when PDTK_HAVE_FLATE)
+│   ├── bench_cmap.cpp          parse/lookup/intern + control (3.1 baseline)
+│   └── bench_evaluator.cpp     text-heavy/kerned-TJ/graphics-heavy + control
+│                               (3.2 baseline - 150 M glyphs/s running text)
 └── tests/                      minimal harness (ADR-0003; migration deferred, U-009)
     ├── test_mmap.cpp           15 cases: truncation acceptance + honesty contract
     ├── test_slab.cpp           16 cases: alignment acceptance + tamper detection
@@ -91,10 +119,16 @@ native/
     │                           Flate-REAL) + OOM guard + Flate integration cases
     ├── test_lexer.cpp          18 cases: token types, escapes, numbers,
     │                           stream contract, hostile-buffer determinism
-    └── test_flate.cpp          19 cases: round-trips, chunk growth/reuse,
+    ├── test_cmap.cpp           34 cases: xxHash64 vectors, CMap constructs,
+    │                           tolerance, Flate fixtures, dedup, concurrency
+    ├── test_flate.cpp          19 cases: round-trips, chunk growth/reuse,
                                 every bomb defense, corruption mapping,
                                 arena integration, determinism (stub case
                                 when compiled out)
+    └── test_evaluator.cpp      34 cases: operator semantics, escape/hex decode,
+                                tolerance/hostility (LCG x200 + 1 MiB junk),
+                                and the +/-0.001 pt golden gate (12 scenarios,
+                                605 glyphs, U-015 interpretation)
 ```
 
 Sibling directories from the same audit task (not native code, so they
@@ -105,8 +139,8 @@ scripts/run_perf.sh            benchmark runner + perf stat stage (see U-010)
 docs/benchmarks/                recorded results — the only citable perf numbers
 ```
 
-Verified: zero-warning build (GCC 14.2, C++20), ctest 11/11 (release;
-the sanitizer presets run 10/10 — python_import_smoke is excluded there
+Verified: zero-warning build (GCC 14.2, C++20), ctest 14/14 (release;
+the sanitizer presets run 13/13 — python_import_smoke is excluded there
 by design),
 `nm -D` shows exactly the 6 C symbols exported from the FFI library,
 extension imports from Python, CLI runs. Guarded-mmap acceptance:
@@ -176,7 +210,7 @@ native/include/pdftoolkit/
 ├── parser/   trailer.hpp (2.1 done) · xref.hpp (2.2 done) · lexer.hpp (2.3 done)
 ├── codec/    flate.hpp (2.4 done)
 ├── font/     cmap.hpp (3.1 done)
-├── layout/   evaluator.hpp (3.2) · materializer.hpp (3.3)
+├── layout/   evaluator.hpp (3.2 done) · materializer.hpp (3.3)
 ├── index/    inverted.hpp (4.1)
 ├── search/   wand.hpp (4.2) · simd.hpp (4.3)
 ├── geometry/ spatial.hpp (4.4)

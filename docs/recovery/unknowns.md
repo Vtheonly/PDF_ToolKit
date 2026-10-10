@@ -207,3 +207,33 @@ entry resolved with a pointer.
   PyMuPDF-differential over real PDFs), run the decode comparison and
   record it; until then the synthetic corpus is the honest,
   reproducible evidence.
+
+## U-015 — "Adobe Acrobat reference output" interpreted as an independent synthetic golden model
+
+* **Question:** the audit's task-3.2 acceptance reads "Graphics and
+  text matrix calculations match Adobe Acrobat reference output to
+  within +/-0.001 point precision." No Acrobat output exists in the
+  repository (no binary fixtures by policy, AGENTS.md 4.8), Acrobat
+  itself is proprietary and unavailable in this environment, and the
+  audit names no reference document. What satisfies the criterion?
+* **Assumption (current):** the same approach as U-013/U-014 — a
+  deterministic generator IS the reference: `scripts/
+  gen_evaluator_golden.py` models ISO 32000-1:2008 cl. 9 semantics
+  INDEPENDENTLY of the C++ evaluator (emission and evaluation fused so
+  stream and expectations cannot drift; operands parsed as binary32 to
+  match the task-2.3 lexer, algebra in binary64 per ADR-0009; seed
+  0x3D2E1F). Its 12 scenarios x 605 golden glyphs (rotated Tm, CTM
+  q/Q stack, kerned TJ, 2-byte CID fonts, Ts/Tz/Tc/Tw, graphics
+  noise, a 400-glyph drift probe, evaluate() continuation) gate the
+  native implementation to 1e-3 pt per glyph Trm field, advance and
+  final matrix (`golden_gate_within_0_001_pt`). Known gap: the
+  generator only contains operator shapes the generator thought of.
+* **Precision note:** Acrobat's own arithmetic is 16.16 fixed point
+  (~1.5e-5 pt resolution), not float32 — the gate never implied
+  float32 accumulation suffices (see ADR-0009's measured 1.309e-03 pt
+  f32 drift on the 400-glyph probe).
+* **How to resolve:** when a real-Acrobat reference (or a
+  PyMuPDF/pdf.js differential over real PDFs) becomes available, run
+  the coordinate comparison and record it as a second reference
+  column; until then the synthetic golden model is the honest,
+  reproducible evidence.

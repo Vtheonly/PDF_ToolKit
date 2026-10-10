@@ -145,7 +145,11 @@ content-mix mean vs the audit's 800 MB/s/core gate**); Phase 3 OPENED
 parsing over the lexer, UTF-16BE + surrogate pairs, build-time
 ligature expansion, xxHash64 content dedup, Flate-compressed CMaps
 first-class; 500-document glyph-test acceptance, **1.43 ns/code
-lookup**).
+lookup**); the content-stream operator state machine (task 3.2:
+push-down, zero-heap, noexcept — full text state, BT/ET/Td/TD/Tm/
+T* and Tj/'/"/TJ kerning over the lexer; **±0.001 pt golden gate**
+vs an independent Python reference model, U-015/ADR-0009; 150 M
+glyphs/s running text).
 
 ```bash
 cmake --preset release -DPython3_EXECUTABLE=$(which python)  # needs cmake+ninja

@@ -84,6 +84,7 @@ add_library(pdftoolkit_core STATIC
   src/parser/lexer.cpp
   src/codec/flate.cpp
   src/font/cmap.cpp
+  src/layout/evaluator.cpp
 )
 target_include_directories(pdftoolkit_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
@@ -189,6 +190,9 @@ if(PDTK_BUILD_TESTS)
     target_link_libraries(pdtk_test_cmap PRIVATE libdeflate_static)
   endif()
 
+  add_executable(pdtk_test_evaluator tests/test_evaluator.cpp)
+  target_link_libraries(pdtk_test_evaluator PRIVATE pdftoolkit_core pdtk_warnings)
+
   add_executable(pdtk_test_flate tests/test_flate.cpp)
   target_link_libraries(pdtk_test_flate PRIVATE pdftoolkit_core pdtk_warnings)
   if(PDTK_HAVE_FLATE)
@@ -213,6 +217,7 @@ if(PDTK_BUILD_TESTS)
   add_test(NAME xref         COMMAND pdtk_test_xref)
   add_test(NAME lexer        COMMAND pdtk_test_lexer)
   add_test(NAME cmap          COMMAND pdtk_test_cmap)
+  add_test(NAME evaluator     COMMAND pdtk_test_evaluator)
   add_test(NAME flate        COMMAND pdtk_test_flate)
   add_test(NAME ffi          COMMAND pdtk_test_ffi)
   add_test(NAME c_abi_smoke  COMMAND pdtk_c_abi_smoke)

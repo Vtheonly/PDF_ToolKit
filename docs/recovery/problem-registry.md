@@ -479,6 +479,16 @@ history — do not delete them.
   the object's file offset; the resolver-to-be only needs to hand over
   spans. When a future task builds the graph, this boundary is the
   seam it plugs into.
+* **Second docking point (task 3.2):** `FontMetricsResolver` — the
+  evaluator asks a callback for each font resource name's code width
+  and glyph advance (w0). Today only test stubs answer; the object-
+  graph resolver is the natural production implementation (resolve
+  /F1 -> font dict -> /Widths or Type0 /W + /DW).
+* **SCHEDULING DECISION (2026-10-10, task-3.2 session):** the
+  resolver must land BEFORE or WITH task 3.3 — recorded as item 1 of
+  the task registry's next-tasks. Task 3.3's materializer cannot
+  ingest real pages without it (page-tree descent for /Contents,
+  /Font resolution for CMaps and widths).
 * **Resolution path:** a task (natural home: Phase 3 alongside 3.3's
   page ingestion, or a dedicated small task before it) implements the
   reference/value layer — indirect reference parsing, /ObjStm
@@ -486,8 +496,8 @@ history — do not delete them.
   and wires `CMapTable` lookups behind it.
 * **Action for the audit owner:** add the missing task (or extend
   3.2/3.3's steps) in `docs/issues.md` / issue #1.
-* **Status:** `open` (planning defect documented; consumer-side seam
-  in place).
+* **Status:** `open` (planning defect documented; consumer-side seams
+  in place; scheduling pinned 2026-10-10).
 
 ## P-024 — Ligature normalization covers Alphabetic Presentation Forms only; Arabic presentation forms and Unicode normalization are out of scope (deliberate scope line)
 
@@ -513,3 +523,48 @@ history — do not delete them.
   time, not CMap-build time), with its own ADR.
 * **Status:** `open` (documented scope line; table is test-locked by
   `ligature_table_is_complete`).
+
+## P-025 — Operator-evaluator scope lines: interim font metrics, fixed capacities, out-of-text policy (deliberate scope lines)
+
+* **Where:** `native/src/layout/evaluator.cpp` (audit issue-1/task-3.2).
+* **What and why (each line is deliberate, each is test-locked or
+  counted in EvaluatorStats):**
+  1. **Interim font metrics.** Real glyph widths live behind the
+     object-graph resolver (P-023). Until it lands, the default
+     `FontMetricsResolver` answers 1-byte codes and w0 = 1000
+     thousandths — the ISO 32000-1 /DW default for CIDFonts — for
+     EVERY font. Consequences: text positions are correct relative to
+     Td/Tm/TJ-number operands, and glyph advances are one-em each;
+     documents whose fonts use other widths place subsequent glyphs
+     at one-em stride. The golden gate (U-015) always supplies a
+     resolver, so the +/-0.001 pt acceptance never depends on this
+     fallback.
+  2. **Fixed capacities.** q/Q stack = 64 frames (a 65th `q` is not
+     saved, counted `gstate_overflow`); operand accumulator = 8
+     numbers + 1 name + 1 string (excess operands dropped, counted).
+     These bound the zero-heap contract; real content streams nest q
+     10-20 deep and no in-scope operator needs more than 6 operands.
+     Acrobat's unbounded stack differs only past depth 64.
+  3. **Out-of-text policy.** Text-positioning/showing operators
+     outside BT..ET are ignored and counted (`ops_outside_text`);
+     text-STATE operators (Tc..Tf) still apply anywhere (9.3.1 — they
+     are graphics state). ISO leaves the out-of-text behaviour of
+     positioning ops undefined; extractors differ (pdfminer applies
+     them); the conservative ignore matches the spec's structure.
+  4. **Continuation granularity.** evaluate() may be called repeatedly
+     to continue a stream (state persists), but operands must share a
+     segment with their operator and an array must share a segment
+     with its TJ: the per-call lexer cannot recover tokens split
+     across buffers. A pending array recorded in a DIFFERENT buffer is
+     dropped (guarded, test-locked).
+  5. **Vertical writing.** Only horizontal-writing advances are
+     implemented (ty = 0); Type0 vertical metrics (w1, /W2) are out
+     of scope until a consumer needs them. The audit's task text
+     lists only the horizontal operators.
+* **Resolution path:** lines 1 and 4 dissolve when P-023 lands (the
+  resolver becomes the production FontMetricsResolver implementer and
+  streams arrive whole from page ingestion); lines 2-3 and 5 are
+  standing scope decisions — revisit only with evidence of real-world
+  breakage.
+* **Status:** `open` (documented scope lines; stats counters make
+  every deviation observable).

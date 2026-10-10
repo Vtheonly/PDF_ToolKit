@@ -6,6 +6,67 @@ for end users.
 
 ---
 
+## 2026-10-10 — Session 6: issue-1/task-3.2 done (content stream operator state machine)
+
+* **OperatorEvaluator landed (audit task 3.2):**
+  `native/include/pdftoolkit/layout/evaluator.hpp` +
+  `native/src/layout/evaluator.cpp` — the layout/ module's first
+  component. Push-down, zero-heap, noexcept state machine over the
+  2.3 ZeroCopyLexer: full text state (Tc/Tw/Tz/TL/Tf/Tr/Ts, q/Q-
+  saveable), positioning (BT/ET, Td/TD, Tm, T*), showing (Tj, ', ",
+  TJ with kerning numbers), graphics state (q/Q + cm — CTM is
+  otherwise unreachable). Glyph advances update Tm but NEVER Tlm
+  (the line-matrix subtlety: Td(0,0) rewinds to the line start);
+  a TJ number's displacement is -(Tj/1000)*Tfs*Th; Tw only on the
+  single-byte code 32.
+* **ADR-0009 (precision model, load-bearing):** the audit mandates
+  float32 `std::array<float,6>` matrices AND a +/-0.001 pt gate —
+  these CONFLICT: a simulated float32 displacement accumulator drifts
+  **1.309e-03 pt over a 400-glyph line** (the golden generator's
+  drift probe), past the gate. Decision: public Mat6 stays float32,
+  internal carry (displacement D, Tlm, CTM, the 14-flop per-glyph
+  Trm closed form against P = Tlm x CTM) is double. Acrobat itself
+  computes in 16.16 fixed point (~1.5e-5 pt) — the gate never
+  implied float32 arithmetic sufficed.
+* **U-015 (the Acrobat-reference interpretation):** no Acrobat output
+  exists in-repo; the gate's reference is the INDEPENDENT Python
+  model `scripts/gen_evaluator_golden.py` (f32 operand parse -> f64
+  algebra, fused emission+evaluation, seed 0x3D2E1F, committed for
+  reproducibility). 12 scenarios x 605 golden glyphs — every glyph's
+  6-field Trm + advance and every final matrix within 1e-3 pt.
+* **TJ arrays without buffering:** an array's byte RANGE is recorded
+  and re-lexed only when TJ follows — `[3 2] 0 d` (dash patterns are
+  everywhere in real streams) can never move the pen; keywords
+  inside dicts (R/true/false/null) and arrays are members, never
+  operators. Both test-locked; 16 bytes of recorder state instead of
+  a multi-KB element buffer.
+* **Two seams for Phase 3's remainder:** GlyphSink (per-glyph code /
+  font / Trm / advance — task 3.3's input) and FontMetricsResolver
+  (code width + w0 per font resource — P-023's docking point, second
+  after CMapCache::intern_stream_object; default 1-byte/1000 = ISO
+  /DW until the resolver lands, P-025).
+* **P-023 SCHEDULED:** the object-graph resolver must land BEFORE or
+  WITH task 3.3 (next-tasks item 1; P-025 records the decision).
+* **Test-drive findings (test-side, instructive):** 3 dangling
+  string_view reads (font views die with the content buffer — the
+  documented zero-copy lifetime contract; the capture sink now copies
+  font names), 2 expectation errors that were REAL semantics
+  learnings (cm pre-multiplication order: a later cm's translation is
+  scaled by the earlier one; TD overwrites TL), 1 arithmetic slip
+  (Tw difference includes the width delta), and float32 advance
+  fields need 1e-6 tolerances. The implementation itself needed no
+  post-test fixes on the golden gate — the independent-model method
+  worked as designed.
+* **Matrix after the change:** release 14/14 zero-warning (ctest grew
+  from 13), debug 14/14, asan+ubsan 13/13, tsan 13/13, offline
+  14/14 (no _deps), Python 644. Benchmark suite is now 7 binaries
+  (pdtk_bench_evaluator added; CI's benchmark step auto-discovers it
+  via run_perf.sh). Recording: `docs/benchmarks/
+  2026-10-10-phase3-evaluator-baseline.md` — text-heavy 150.0 M
+  glyphs/s (6.67 ns/glyph) vs same-run control 4620.1 MB/s.
+
+---
+
 ## 2026-10-10 — Session 5: issue-1/task-3.1 done (CMap cache & Unicode resolver — Phase 3 opened)
 
 * **CMapTable + CMapCache landed (audit task 3.1):**
